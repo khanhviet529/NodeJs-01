@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Node.js Event Loop Phases</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#ffffff;--bg2:#f6f5f0;--bg3:#eeede8;
+  --border:rgba(0,0,0,0.1);--border2:rgba(0,0,0,0.06);
+  --text:#1a1a18;--text2:#6b6b65;--text3:#9a9a94;
+  --font:system-ui,sans-serif;--mono:'Menlo','Consolas',monospace;
+  --radius:8px;
+}
+@media(prefers-color-scheme:dark){
+  :root{--bg:#1c1c1a;--bg2:#252523;--bg3:#2e2e2b;--border:rgba(255,255,255,0.1);--border2:rgba(255,255,255,0.06);--text:#e8e6de;--text2:#9a9892;--text3:#6a6864}
+}
+body{font-family:var(--font);background:var(--bg);color:var(--text);padding:16px;font-size:13px;line-height:1.6;max-width:900px;margin:0 auto}
+
+h1{font-size:17px;font-weight:500;margin-bottom:3px}
+.sub{font-size:12px;color:var(--text2);margin-bottom:16px}
+
+/* Phase nav pills */
+.phase-nav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.pnav{
+  padding:5px 12px;border-radius:20px;border:1px solid var(--border);
+  background:var(--bg2);color:var(--text2);cursor:pointer;font-size:12px;
+  transition:all .15s;white-space:nowrap;
+}
+.pnav:hover{background:var(--bg3)}
+.pnav.active{color:#fff;border-color:transparent}
+
+/* Main layout */
+.main{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+@media(max-width:600px){.main{grid-template-columns:1fr}}
+
+.card{border:1px solid var(--border);border-radius:var(--radius);padding:14px;background:var(--bg)}
+.card-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);margin-bottom:8px}
+
+.phase-header{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.phase-num{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;flex-shrink:0}
+.phase-name{font-size:15px;font-weight:500}
+.phase-sub{font-size:12px;color:var(--text2);margin-top:1px}
+
+.desc{font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:10px}
+
+/* Queue visual */
+.queue-wrap{margin-bottom:10px}
+.queue-label{font-size:11px;color:var(--text3);margin-bottom:4px}
+.queue-visual{display:flex;gap:4px;flex-wrap:wrap}
+.q-item{padding:3px 8px;border-radius:4px;font-size:11px;font-family:var(--mono);border:1px solid transparent}
+
+/* Key points */
+.points{list-style:none;margin-bottom:8px}
+.points li{font-size:12px;color:var(--text2);padding:4px 0;border-bottom:1px solid var(--border2);display:flex;gap:6px}
+.points li:last-child{border-bottom:none}
+.dot{width:6px;height:6px;border-radius:50%;margin-top:6px;flex-shrink:0}
+
+/* Code block */
+.code{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px;font-family:var(--mono);font-size:11px;color:var(--text);line-height:1.7;overflow-x:auto;white-space:pre;margin-bottom:8px}
+.c-comment{color:var(--text3)}
+.c-kw{color:#7F77DD}
+.c-fn{color:#1D9E75}
+.c-str{color:#D85A30}
+.c-num{color:#BA7517}
+
+/* Output badge */
+.output-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--mono);margin:2px;border:1px solid transparent}
+
+/* Big loop diagram */
+.loop-diagram{border:1px solid var(--border);border-radius:var(--radius);padding:16px;background:var(--bg);margin-bottom:12px}
+.loop-row{display:flex;align-items:center;gap:0;margin-bottom:4px;flex-wrap:wrap}
+.loop-box{
+  padding:7px 12px;border-radius:6px;font-size:12px;font-weight:500;
+  border:1px solid transparent;text-align:center;min-width:90px;flex-shrink:0;
+  cursor:pointer;transition:opacity .15s;
+}
+.loop-box:hover{opacity:.8}
+.loop-arrow{font-size:14px;color:var(--text3);margin:0 4px;flex-shrink:0}
+.loop-note{font-size:11px;color:var(--text3);margin-top:3px}
+
+/* Special queue section */
+.special-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+@media(max-width:500px){.special-row{grid-template-columns:1fr}}
+
+/* Comparison table */
+.table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px}
+.table th{text-align:left;padding:7px 10px;border-bottom:2px solid var(--border);color:var(--text2);font-weight:500;font-size:11px;text-transform:uppercase}
+.table td{padding:7px 10px;border-bottom:1px solid var(--border2);color:var(--text)}
+.table tr:last-child td{border-bottom:none}
+.table tr:hover td{background:var(--bg2)}
+
+.tag{display:inline-block;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:500}
+</style>
+</head>
+<body>
+
+<h1>Node.js Event Loop — Các Phase</h1>
+<p class="sub">Click vào từng phase để xem chi tiết</p>
+
+<!-- Phase nav -->
+<div class="phase-nav" id="phase-nav"></div>
+
+<!-- Loop diagram -->
+<div class="loop-diagram">
+  <div style="font-size:11px;color:var(--text3);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Thứ tự vòng lặp</div>
+  <div class="loop-row" id="loop-row"></div>
+  <div class="loop-note">↕ Sau mỗi phase: drain hết <b>nextTick Queue</b> → rồi <b>Microtask Queue (Promise)</b> trước khi chuyển phase tiếp</div>
+</div>
+
+<!-- Detail panel -->
+<div class="main">
+  <div>
+    <div class="card" id="detail-left"></div>
+  </div>
+  <div>
+    <div class="card" id="detail-right"></div>
+    <div class="card" style="margin-top:12px" id="detail-code"></div>
+  </div>
+</div>
+
+<!-- Special queues -->
+<div style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Queue đặc biệt (chạy GIỮA các phase)</div>
+<div class="special-row">
+  <div class="card" id="spec-nexttick"></div>
+  <div class="card" id="spec-microtask"></div>
+</div>
+
+<!-- Comparison table -->
+<div class="card">
+  <div class="card-title">So sánh các callback API</div>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>API</th>
+        <th>Phase</th>
+        <th>Thứ tự ưu tiên</th>
+        <th>Ghi chú</th>
+      </tr>
+    </thead>
+    <tbody id="compare-table"></tbody>
+  </table>
+</div>
+
+<!-- Poll Phase I/O routing summary -->
+<div style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;margin-top:4px">Poll Phase ④ — Ai đưa callback vào đây?</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+
+  <!-- Group 1: OS Kernel -->
+  <div class="card" style="border-color:#97C459">
+    <div class="card-title" style="color:#3B6D11">Nhóm 1 — Giao thẳng cho OS Kernel</div>
+    <div style="font-size:11px;font-weight:500;color:#3B6D11;margin-bottom:6px;padding:4px 8px;background:#EAF3DE;border-radius:5px;display:inline-block">Không dùng Thread Pool</div>
+    <p class="desc">Network I/O: HTTP, TCP, UDP, WebSocket... OS đã được thiết kế để xử lý hàng vạn kết nối mạng đồng thời từ thuở sơ khai của Internet.</p>
+    <ul class="points">
+      <li><span class="dot" style="background:#639922"></span><strong>Cơ chế:</strong> Card mạng nhận data → bắn ngắt phần cứng (hardware interrupt) → OS Kernel nhận và đưa vào hàng đợi — không cần thread nào phải "đứng chờ"</li>
+      <li><span class="dot" style="background:#639922"></span><strong>Trên Linux:</strong> <code style="font-family:var(--mono);font-size:11px">epoll</code> — đăng ký hàng nghìn socket, kernel tự báo khi có data</li>
+      <li><span class="dot" style="background:#639922"></span><strong>Trên macOS:</strong> <code style="font-family:var(--mono);font-size:11px">kqueue</code></li>
+      <li><span class="dot" style="background:#639922"></span><strong>Trên Windows:</strong> <code style="font-family:var(--mono);font-size:11px">IOCP</code> (I/O Completion Ports)</li>
+      <li><span class="dot" style="background:#639922"></span>libuv không dại tự làm — nó ném thẳng cho OS và Poll phase nhận callback khi kernel báo xong</li>
+    </ul>
+    <div style="background:#EAF3DE;border-radius:6px;padding:8px 10px;font-size:11px;color:#27500A">
+      <strong>APIs:</strong> http.get(), net.connect(), tcp socket, udp socket, WebSocket
+    </div>
+  </div>
+
+  <!-- Group 2: Thread Pool -->
+  <div class="card" style="border-color:#FAC775">
+    <div class="card-title" style="color:#633806">Nhóm 2 — Ném vào Thread Pool</div>
+    <div style="font-size:11px;font-weight:500;color:#633806;margin-bottom:6px;padding:4px 8px;background:#FAEEDA;border-radius:5px;display:inline-block">Dùng Thread Pool (mặc định 4 threads)</div>
+    <p class="desc">Hai loại tác vụ mà Node.js biết: để Main Thread tự làm sẽ bị đóng băng, còn nhờ OS làm kiểu non-blocking thì không tin tưởng được hoặc không khả thi.</p>
+
+    <div style="font-size:11px;font-weight:600;color:#854F0B;margin:8px 0 4px">Loại 2A — File System I/O (ổ cứng)</div>
+    <ul class="points" style="margin-bottom:8px">
+      <li><span class="dot" style="background:#BA7517"></span><strong>Lý do:</strong> Ổ cứng vật lý (đặc biệt HDD) phức tạp — file bị lock, phân mảnh, API async của OS không nhất quán giữa Windows/Linux/macOS</li>
+      <li><span class="dot" style="background:#BA7517"></span>libuv giao cho thread phụ: "mày đứng im block ở đây chờ ổ cứng đọc xong, tao không tin OS làm việc này"</li>
+      <li><span class="dot" style="background:#BA7517"></span><strong>APIs:</strong> fs.readFile, fs.writeFile, fs.stat, fs.readdir...</li>
+    </ul>
+
+    <div style="font-size:11px;font-weight:600;color:#854F0B;margin:8px 0 4px">Loại 2B — CPU-Intensive Tasks (tính toán nặng)</div>
+    <ul class="points">
+      <li><span class="dot" style="background:#BA7517"></span><strong>Lý do:</strong> Thuần túy là toán học, không liên quan I/O hay phần cứng — nhưng nếu Main Thread ngồi tính 2 giây thì server đóng băng 2 giây</li>
+      <li><span class="dot" style="background:#BA7517"></span>Thread phụ âm thầm ngồi tính, Main Thread tiếp tục nhận request</li>
+      <li><span class="dot" style="background:#BA7517"></span><strong>APIs:</strong> crypto.pbkdf2, crypto.scrypt, zlib.gzip, dns.lookup</li>
+    </ul>
+
+    <div style="background:#FAEEDA;border-radius:6px;padding:8px 10px;font-size:11px;color:#633806;margin-top:6px">
+      <strong>Kết quả:</strong> Thread Pool xong → libuv nhận → callback vào Poll Queue → Poll phase chạy callback trên Main Thread
+    </div>
+  </div>
+</div>
+
+<!-- Flow diagram -->
+<div class="card" style="margin-bottom:10px">
+  <div class="card-title">Luồng hoàn chỉnh — callback đến Poll phase từ đâu</div>
+  <div style="display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:6px;align-items:center;margin-bottom:8px">
+    <div style="border-radius:7px;padding:10px;background:#EAF3DE;border:1px solid #97C459;text-align:center">
+      <div style="font-size:11px;font-weight:600;color:#27500A">OS Kernel</div>
+      <div style="font-size:10px;color:#3B6D11;margin-top:3px">epoll / kqueue / IOCP</div>
+      <div style="font-size:10px;color:#3B6D11">Network I/O</div>
+    </div>
+    <div style="text-align:center;font-size:16px;color:var(--text3)">→</div>
+    <div style="border-radius:7px;padding:10px;background:#E6F1FB;border:1px solid #85B7EB;text-align:center">
+      <div style="font-size:11px;font-weight:600;color:#0C447C">Poll Queue</div>
+      <div style="font-size:10px;color:#185FA5;margin-top:3px">I/O callback queue</div>
+      <div style="font-size:10px;color:#185FA5">chờ Event Loop</div>
+    </div>
+    <div style="text-align:center;font-size:16px;color:var(--text3)">→</div>
+    <div style="border-radius:7px;padding:10px;background:#E6F1FB;border:2px solid #185FA5;text-align:center">
+      <div style="font-size:11px;font-weight:600;color:#0C447C">④ Poll Phase</div>
+      <div style="font-size:10px;color:#185FA5;margin-top:3px">drain queue</div>
+      <div style="font-size:10px;color:#185FA5">→ Call Stack (V8)</div>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:6px;align-items:center">
+    <div style="border-radius:7px;padding:10px;background:#FAEEDA;border:1px solid #FAC775;text-align:center">
+      <div style="font-size:11px;font-weight:600;color:#633806">Thread Pool</div>
+      <div style="font-size:10px;color:#854F0B;margin-top:3px">4 C-threads</div>
+      <div style="font-size:10px;color:#854F0B">fs + crypto + zlib</div>
+    </div>
+    <div style="text-align:center;font-size:16px;color:var(--text3)">→</div>
+    <div style="border-radius:7px;padding:10px;background:#E6F1FB;border:1px solid #85B7EB;text-align:center">
+      <div style="font-size:11px;font-weight:600;color:#0C447C">Poll Queue</div>
+      <div style="font-size:10px;color:#185FA5;margin-top:3px">nguồn khác nhau</div>
+      <div style="font-size:10px;color:#185FA5">cùng 1 đích</div>
+    </div>
+    <div style="text-align:center;font-size:16px;color:var(--text3)">→</div>
+    <div style="border-radius:7px;padding:10px;background:#E6F1FB;border:2px solid #185FA5;text-align:center">
+      <div style="font-size:11px;font-weight:600;color:#0C447C">④ Poll Phase</div>
+      <div style="font-size:10px;color:#185FA5;margin-top:3px">không phân biệt</div>
+      <div style="font-size:10px;color:#185FA5">nguồn nào</div>
+    </div>
+  </div>
+  <div style="font-size:11px;color:var(--text3);margin-top:8px;text-align:center">Poll phase không quan tâm callback đến từ OS hay Thread Pool — nó chỉ drain hết queue</div>
+</div>
+
+<script>
+const C = {
+  purple:'#7F77DD', teal:'#1D9E75', amber:'#BA7517',
+  coral:'#D85A30', blue:'#185FA5', pink:'#D4537E',
+  gray:'#888780', green:'#639922', red:'#E24B4A'
+};
+const BG = {
+  purple:'#EEEDFE', teal:'#E1F5EE', amber:'#FAEEDA',
+  coral:'#FAECE7', blue:'#E6F1FB', pink:'#FBEAF0',
+  gray:'#F1EFE8', green:'#EAF3DE', red:'#FCEBEB'
+};
+
+const phases = [
+  {
+    id:'timers', num:'①', name:'Timers', sub:'setTimeout · setInterval',
+    color:C.amber, bg:BG.amber,
+    desc:'Thực thi các callback của setTimeout() và setInterval() mà đã đến thời gian chờ (delay). Không đảm bảo chạy đúng giờ — nếu Call Stack đang bận thì sẽ trễ hơn delay đã đặt.',
+    points:[
+      'delay=0 KHÔNG có nghĩa là chạy ngay — chỉ có nghĩa là "càng sớm càng tốt sau khi Call Stack trống"',
+      'Nếu nhiều timer cùng delay, chúng được chạy tuần tự theo thứ tự đăng ký',
+      'setInterval tạo ra callback mới sau mỗi interval, nhưng nếu callback chạy lâu hơn interval thì sẽ bị dồn queue',
+      'Thực tế: timer thường trễ vài ms do overhead của Event Loop',
+    ],
+    apis:['setTimeout(cb, delay)', 'setInterval(cb, delay)'],
+    queueItems:['cb1 — delay hết hạn','cb2 — delay hết hạn'],
+    code:`<span class="c-comment">// Ví dụ Timers phase</span>
+<span class="c-kw">const</span> start = Date.<span class="c-fn">now</span>();
+
+<span class="c-fn">setTimeout</span>(() => {
+  <span class="c-comment">// Chạy ở Timers phase, sau khi Call Stack trống</span>
+  console.<span class="c-fn">log</span>(<span class="c-str">\`ran after \${Date.now() - start}ms\`</span>);
+  <span class="c-comment">// Thực tế: in ~1-4ms dù delay=0</span>
+}, <span class="c-num">0</span>);
+
+<span class="c-comment">// setTimeout vs setImmediate trong I/O callback:</span>
+<span class="c-comment">// Bên trong I/O callback → setImmediate luôn chạy TRƯỚC</span>
+<span class="c-comment">// Ngoài I/O callback → thứ tự không đảm bảo</span>`,
+    outputNote:'Thứ tự: setTimeout(0) chạy SAU nextTick và Promise'
+  },
+  {
+    id:'pending', num:'②', name:'Pending Callbacks', sub:'System-level I/O errors bị defer',
+    color:C.coral, bg:BG.coral,
+    desc:'Thực thi các system callback bị defer (trì hoãn) từ vòng Event Loop trước. Đây là "trạm trung chuyển" cho các callback lỗi tầng thấp (kernel/OS) — chủ yếu là lỗi mạng và I/O hệ thống, không phải callback đọc/ghi file thông thường.',
+    points:[
+      'Vị trí: phase ② — ngay sau Timers, trước Idle/Prepare',
+      'Callback I/O thành công (fs.readFile done) đi vào Poll phase — KHÔNG phải đây',
+      'Callback lỗi hệ thống (ECONNREFUSED, EPIPE) mới vào đây — bị defer từ vòng trước',
+      '━━ Lý do 1 — Bảo vệ tính bất đồng bộ: dù OS phát hiện lỗi gần như ngay lập tức, Node.js vẫn defer callback sang vòng sau để đảm bảo thứ tự thực thi luôn nhất quán, không có kết quả trả về trước khi code hiện tại chạy xong',
+      '━━ Lý do 2 — Cross-platform nhất quán: Windows/Linux/macOS báo lỗi tầng thấp ở các thời điểm khác nhau; bằng cách gom vào Pending Callbacks, Node.js đảm bảo thứ tự thực thi giống hệt nhau trên mọi hệ điều hành',
+      '━━ Lý do 3 — Bảo vệ hiệu năng Poll phase: Poll phase tập trung xử lý data stream đang chạy tốt; lỗi yêu cầu dọn dẹp tài nguyên nên được tách ra, xử lý ở đầu chu kỳ mới để không làm nghẽn Poll',
+      'Cơ chế thực tế: cuối Poll phase của vòng trước, libuv đánh dấu một số lỗi hệ thống là "pending" → Pending Callbacks của vòng mới nhận và chạy chúng',
+    ],
+    apis:['TCP ECONNREFUSED', 'EPIPE (broken pipe)', 'Deferred system I/O errors'],
+    queueItems:['ECONNREFUSED cb', 'EPIPE cb', 'deferred OS error cb'],
+    code:`<span class="c-comment">// Ví dụ 1: ECONNREFUSED — kết nối bị từ chối</span>
+<span class="c-kw">const</span> net = <span class="c-fn">require</span>(<span class="c-str">'net'</span>);
+<span class="c-kw">const</span> client = net.<span class="c-fn">createConnection</span>({ port: <span class="c-num">9999</span> });
+
+client.<span class="c-fn">on</span>(<span class="c-str">'error'</span>, (err) => {
+  <span class="c-comment">// OS phát hiện lỗi gần như ngay lập tức</span>
+  <span class="c-comment">// nhưng callback này bị defer sang vòng sau</span>
+  <span class="c-comment">// → chạy ở Pending Callbacks phase</span>
+  console.<span class="c-fn">log</span>(err.code); <span class="c-comment">// 'ECONNREFUSED'</span>
+});
+
+<span class="c-comment">// Ví dụ 2: EPIPE — đường ống bị đứt</span>
+process.stdout.<span class="c-fn">on</span>(<span class="c-str">'error'</span>, (err) => {
+  <span class="c-comment">// Xảy ra khi pipe destination đóng sớm</span>
+  <span class="c-comment">// ví dụ: node app.js | head -5</span>
+  <span class="c-comment">// → callback cũng vào Pending Callbacks</span>
+  <span class="c-kw">if</span> (err.code === <span class="c-str">'EPIPE'</span>) process.<span class="c-fn">exit</span>(<span class="c-num">0</span>);
+});
+
+<span class="c-comment">// Tại sao defer? Để đảm bảo thứ tự này luôn đúng:</span>
+console.<span class="c-fn">log</span>(<span class="c-str">'A'</span>);           <span class="c-comment">// sync → in ngay</span>
+client.<span class="c-fn">connect</span>(...);        <span class="c-comment">// I/O → giao OS</span>
+console.<span class="c-fn">log</span>(<span class="c-str">'B'</span>);           <span class="c-comment">// sync → in ngay</span>
+<span class="c-comment">// Output đảm bảo: A → B → (error callback)</span>
+<span class="c-comment">// Không bao giờ: A → (error) → B</span>`,
+    outputNote:'Cơ chế defer đảm bảo: sync code luôn chạy xong trước khi bất kỳ error callback nào được gọi'
+  },
+  {
+    id:'idle', num:'③', name:'Idle / Prepare', sub:'Internal only',
+    color:C.gray, bg:BG.gray,
+    desc:'Phase nội bộ của libuv, dùng để chuẩn bị cho Poll phase. Lập trình viên Node.js KHÔNG thể tương tác với phase này — nó chỉ dùng nội bộ bởi Node.js runtime.',
+    points:[
+      'Không có API public nào đưa callback vào phase này',
+      'libuv dùng để thực hiện các tác vụ chuẩn bị nội bộ',
+      'Thường bị bỏ qua trong các tài liệu vì không ảnh hưởng đến code người dùng',
+      'Tồn tại để tách biệt logic chuẩn bị khỏi logic I/O thực tế',
+    ],
+    apis:['(internal only — no public API)'],
+    queueItems:['internal libuv tasks'],
+    code:`<span class="c-comment">// Idle / Prepare — không có API public</span>
+<span class="c-comment">// Phase này hoàn toàn do Node.js/libuv quản lý nội bộ</span>
+<span class="c-comment">// Bạn không thể (và không cần) đưa callback vào đây</span>
+
+<span class="c-comment">// Trong thực tế, khi đọc tài liệu Event Loop,</span>
+<span class="c-comment">// phase này thường được bỏ qua vì không liên quan</span>
+<span class="c-comment">// đến code JavaScript của bạn</span>`,
+    outputNote:'Không ảnh hưởng đến JavaScript code của bạn'
+  },
+  {
+    id:'poll', num:'④', name:'Poll', sub:'I/O callbacks · Trái tim Event Loop',
+    color:C.blue, bg:BG.blue,
+    desc:'Đây là phase QUAN TRỌNG NHẤT. Poll phase làm 2 việc: (1) tính toán thời gian chờ I/O mới, (2) xử lý các sự kiện trong poll queue — tức là các callback I/O đã hoàn thành như fs.readFile, network, database...',
+    points:[
+      'Nếu poll queue CÒN callback → chạy hết tuần tự (hoặc đến giới hạn hệ thống)',
+      'Nếu poll queue TRỐNG và có setImmediate → chuyển ngay sang Check phase',
+      'Nếu poll queue TRỐNG và không có setImmediate → BLOCK ở đây chờ I/O mới',
+      'Thời gian block bị giới hạn bởi timer gần nhất đang chờ trong Timers phase',
+      'Đây là lý do Node.js "biết" lúc nào có I/O mới mà không cần busy-waiting (polling liên tục)',
+    ],
+    apis:['fs.readFile cb', 'http request cb', 'net.socket cb', 'database query cb'],
+    queueItems:['fs.readFile done','http response cb','db query result'],
+    code:`<span class="c-comment">// Poll phase — xử lý I/O callbacks</span>
+<span class="c-kw">const</span> fs = <span class="c-fn">require</span>(<span class="c-str">'fs'</span>);
+
+fs.<span class="c-fn">readFile</span>(<span class="c-str">'./data.txt'</span>, (err, data) => {
+  <span class="c-comment">// Callback này chạy ở Poll phase</span>
+  <span class="c-comment">// khi libuv thread pool đọc file xong</span>
+  console.<span class="c-fn">log</span>(<span class="c-str">'file read!'</span>, data.length);
+
+  <span class="c-comment">// setImmediate trong I/O callback</span>
+  <span class="c-comment">// → LUÔN chạy trước setTimeout(fn,0)</span>
+  <span class="c-fn">setImmediate</span>(() => console.<span class="c-fn">log</span>(<span class="c-str">'immediate'</span>));
+  <span class="c-fn">setTimeout</span>(() => console.<span class="c-fn">log</span>(<span class="c-str">'timeout'</span>), <span class="c-num">0</span>);
+  <span class="c-comment">// Output: immediate → timeout</span>
+});`,
+    outputNote:'Poll → Check (setImmediate) → Timers (setTimeout) khi trong I/O callback'
+  },
+  {
+    id:'check', num:'⑤', name:'Check', sub:'setImmediate',
+    color:C.purple, bg:BG.purple,
+    desc:'Thực thi các callback được đăng ký bởi setImmediate(). Check phase luôn chạy SAU Poll phase. Đây là lý do setImmediate() được đặt tên vậy — nó "ngay lập tức" sau I/O polling.',
+    points:[
+      'setImmediate() đảm bảo callback chạy Ở VÒNG LẶP HIỆN TẠI (sau Poll), không bị delay như setTimeout',
+      'Trong I/O callback: setImmediate LUÔN chạy trước setTimeout(fn, 0)',
+      'Ngoài I/O callback: thứ tự setImmediate vs setTimeout(0) KHÔNG đảm bảo',
+      'Dùng khi muốn code chạy sau I/O nhưng không muốn chờ đến Timers phase tiếp theo',
+      'Hữu ích để nhường lượt cho I/O xử lý trước khi tiếp tục logic',
+    ],
+    apis:['setImmediate(cb)'],
+    queueItems:['setImmediate cb1','setImmediate cb2'],
+    code:`<span class="c-comment">// setImmediate vs setTimeout — demo thứ tự</span>
+
+<span class="c-comment">// TRONG I/O callback → setImmediate luôn trước</span>
+fs.<span class="c-fn">readFile</span>(<span class="c-str">'file'</span>, () => {
+  <span class="c-fn">setImmediate</span>(() => console.<span class="c-fn">log</span>(<span class="c-str">'A'</span>)); <span class="c-comment">// ← luôn in trước</span>
+  <span class="c-fn">setTimeout</span>(() => console.<span class="c-fn">log</span>(<span class="c-str">'B'</span>), <span class="c-num">0</span>);
+  <span class="c-comment">// A → B (đảm bảo)</span>
+});
+
+<span class="c-comment">// NGOÀI I/O callback → không đảm bảo thứ tự</span>
+<span class="c-fn">setImmediate</span>(() => console.<span class="c-fn">log</span>(<span class="c-str">'A'</span>));
+<span class="c-fn">setTimeout</span>(() => console.<span class="c-fn">log</span>(<span class="c-str">'B'</span>), <span class="c-num">0</span>);
+<span class="c-comment">// A → B hoặc B → A (tùy hệ thống)</span>`,
+    outputNote:'setImmediate trong I/O callback luôn chạy trước setTimeout(fn,0)'
+  },
+  {
+    id:'close', num:'⑥', name:'Close Callbacks', sub:'socket.destroy · process.exit',
+    color:C.pink, bg:BG.pink,
+    desc:'Thực thi các callback của sự kiện đóng kết nối hoặc hủy resource. Ví dụ: socket.on("close", cb), server.close(cb). Đây là phase cuối cùng trước khi vòng lặp kết thúc hoặc bắt đầu lại.',
+    points:[
+      'Xử lý dọn dẹp tài nguyên: đóng file descriptor, socket, database connection',
+      'Nếu socket bị destroy() đột ngột thay vì close() → close event được emit ở phase này',
+      'Sau phase này: nếu còn ref (timer, socket đang lắng nghe) → quay lại Timers phase',
+      'Nếu không còn ref nào → Event Loop thoát, process kết thúc',
+    ],
+    apis:['socket.on("close", cb)', 'server.close(cb)', 'process.on("exit", cb)'],
+    queueItems:['socket close cb','server close cb'],
+    code:`<span class="c-comment">// Close Callbacks phase</span>
+<span class="c-kw">const</span> net = <span class="c-fn">require</span>(<span class="c-str">'net'</span>);
+
+<span class="c-kw">const</span> server = net.<span class="c-fn">createServer</span>((socket) => {
+  socket.<span class="c-fn">on</span>(<span class="c-str">'close'</span>, (hadError) => {
+    <span class="c-comment">// Chạy ở Close Callbacks phase</span>
+    <span class="c-comment">// khi connection bị đóng</span>
+    console.<span class="c-fn">log</span>(<span class="c-str">'socket closed'</span>, hadError);
+  });
+});
+
+server.<span class="c-fn">close</span>(() => {
+  <span class="c-comment">// Chạy ở Close Callbacks phase</span>
+  <span class="c-comment">// khi server ngừng accept connections mới</span>
+  console.<span class="c-fn">log</span>(<span class="c-str">'server closed'</span>);
+});`,
+    outputNote:'Phase cuối — sau đây Event Loop kiểm tra còn ref không để quyết định thoát hay lặp lại'
+  }
+];
+
+const specialQueues = [
+  {
+    id:'nexttick', name:'nextTick Queue', color:C.teal, bg:BG.teal,
+    priority:'Ưu tiên #1',
+    desc:'Chạy sau MỖI operation, trước khi Event Loop chuyển bất kỳ phase nào. Thậm chí chạy trước cả Microtask Queue.',
+    points:[
+      'process.nextTick(cb) — đưa cb vào nextTick Queue',
+      'Drain TOÀN BỘ queue trước khi làm bất cứ điều gì khác',
+      'Có thể gây starvation nếu nextTick liên tục tạo nextTick mới',
+      'Dùng để đảm bảo callback chạy trong "current iteration" — sau sync code nhưng trước I/O',
+    ],
+    code:`process.<span class="c-fn">nextTick</span>(() => {
+  <span class="c-comment">// Chạy trước Promise.then</span>
+  <span class="c-comment">// Chạy trước bất kỳ phase nào</span>
+  console.<span class="c-fn">log</span>(<span class="c-str">'nextTick'</span>);
+});`
+  },
+  {
+    id:'microtask', name:'Microtask Queue', color:C.teal, bg:BG.teal,
+    priority:'Ưu tiên #2',
+    desc:'Chạy sau nextTick Queue hết, trước khi Event Loop chuyển phase. Chứa Promise callbacks và queueMicrotask.',
+    points:[
+      'Promise.resolve().then(cb) — đưa cb vào Microtask Queue',
+      'queueMicrotask(cb) — tương tự Promise.then nhưng tường minh hơn',
+      'MutationObserver (trình duyệt) — không có trong Node.js',
+      'Drain TOÀN BỘ queue sau mỗi nextTick drain',
+    ],
+    code:`Promise.<span class="c-fn">resolve</span>().<span class="c-fn">then</span>(() => {
+  <span class="c-comment">// Sau nextTick, trước phase tiếp theo</span>
+  console.<span class="c-fn">log</span>(<span class="c-str">'promise'</span>);
+});
+<span class="c-fn">queueMicrotask</span>(() => {
+  console.<span class="c-fn">log</span>(<span class="c-str">'microtask'</span>);
+});`
+  }
+];
+
+const compareData = [
+  { api:'process.nextTick()', phase:'nextTick Queue', priority:'#1 cao nhất', note:'Trước mọi thứ', tagColor:C.teal, tagBg:BG.teal },
+  { api:'Promise.then() / queueMicrotask()', phase:'Microtask Queue', priority:'#2', note:'Sau nextTick', tagColor:C.teal, tagBg:BG.teal },
+  { api:'setTimeout(cb, 0)', phase:'Timers ①', priority:'#3', note:'Không đảm bảo thứ tự vs setImmediate', tagColor:C.amber, tagBg:BG.amber },
+  { api:'setInterval(cb, n)', phase:'Timers ①', priority:'#3', note:'Lặp lại mỗi n ms', tagColor:C.amber, tagBg:BG.amber },
+  { api:'fs.readFile / net / http', phase:'Poll ④', priority:'#4', note:'Khi I/O hoàn thành', tagColor:C.blue, tagBg:BG.blue },
+  { api:'setImmediate()', phase:'Check ⑤', priority:'#5', note:'Sau Poll, trước Timers vòng sau', tagColor:C.purple, tagBg:BG.purple },
+  { api:'socket.on("close")', phase:'Close ⑥', priority:'#6 thấp nhất', note:'Dọn dẹp tài nguyên', tagColor:C.pink, tagBg:BG.pink },
+];
+
+let activePid = 'timers';
+
+// Build phase nav
+const nav = document.getElementById('phase-nav');
+phases.forEach(p => {
+  const btn = document.createElement('button');
+  btn.className = 'pnav' + (p.id === activePid ? ' active' : '');
+  btn.id = 'pnav-' + p.id;
+  btn.textContent = p.num + ' ' + p.name;
+  if (p.id === activePid) { btn.style.background = p.color; }
+  btn.onclick = () => selectPhase(p.id);
+  nav.appendChild(btn);
+});
+
+// Build loop diagram
+const loopRow = document.getElementById('loop-row');
+phases.forEach((p, i) => {
+  if (p.id === 'idle') return; // skip idle in diagram
+  const box = document.createElement('div');
+  box.className = 'loop-box';
+  box.id = 'lbox-' + p.id;
+  box.textContent = p.num + ' ' + p.name;
+  box.style.background = p.bg;
+  box.style.color = p.color;
+  box.style.borderColor = p.color + '55';
+  box.onclick = () => selectPhase(p.id);
+  loopRow.appendChild(box);
+  if (i < phases.length - 2) {
+    const arr = document.createElement('span');
+    arr.className = 'loop-arrow';
+    arr.textContent = '→';
+    loopRow.appendChild(arr);
+  }
+});
+
+// Build special queues
+function buildSpecial() {
+  specialQueues.forEach(sq => {
+    const el = document.getElementById('spec-' + sq.id);
+    el.innerHTML = `
+      <div class="card-title">${sq.name} <span class="tag" style="background:${sq.bg};color:${sq.color}">${sq.priority}</span></div>
+      <p class="desc">${sq.desc}</p>
+      <ul class="points">${sq.points.map(p => `<li><span class="dot" style="background:${sq.color}"></span>${p}</li>`).join('')}</ul>
+      <div class="code">${sq.code}</div>
+    `;
+  });
+}
+
+// Build compare table
+const tbody = document.getElementById('compare-table');
+compareData.forEach(row => {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><code style="font-size:11px;font-family:var(--mono)">${row.api}</code></td>
+    <td><span class="tag" style="background:${row.tagBg};color:${row.tagColor}">${row.phase}</span></td>
+    <td style="color:var(--text2)">${row.priority}</td>
+    <td style="color:var(--text2)">${row.note}</td>
+  `;
+  tbody.appendChild(tr);
+});
+
+function selectPhase(pid) {
+  activePid = pid;
+  const p = phases.find(x => x.id === pid);
+  if (!p) return;
+
+  // Update nav
+  phases.forEach(ph => {
+    const btn = document.getElementById('pnav-' + ph.id);
+    if (!btn) return;
+    btn.classList.toggle('active', ph.id === pid);
+    btn.style.background = ph.id === pid ? ph.color : '';
+    btn.style.color = ph.id === pid ? '#fff' : '';
+  });
+
+  // Update loop diagram highlight
+  phases.forEach(ph => {
+    const box = document.getElementById('lbox-' + ph.id);
+    if (!box) return;
+    box.style.outline = ph.id === pid ? `2px solid ${ph.color}` : 'none';
+    box.style.outlineOffset = '2px';
+  });
+
+  // Detail left
+  document.getElementById('detail-left').innerHTML = `
+    <div class="phase-header">
+      <div class="phase-num" style="background:${p.bg};color:${p.color}">${p.num}</div>
+      <div>
+        <div class="phase-name">${p.name}</div>
+        <div class="phase-sub">${p.sub}</div>
+      </div>
+    </div>
+    <p class="desc">${p.desc}</p>
+    <div class="queue-wrap">
+      <div class="queue-label">APIs đưa callback vào phase này</div>
+      <div class="queue-visual">${p.apis.map(a => `<span class="q-item" style="background:${p.bg};color:${p.color};border-color:${p.color}44">${a}</span>`).join('')}</div>
+    </div>
+    <div class="queue-wrap" style="margin-top:8px">
+      <div class="queue-label">Queue items (ví dụ)</div>
+      <div class="queue-visual">${p.queueItems.map(a => `<span class="q-item" style="background:${p.bg};color:${p.color};border-color:${p.color}44">${a}</span>`).join('')}</div>
+    </div>
+  `;
+
+  // Detail right — key points
+  document.getElementById('detail-right').innerHTML = `
+    <div class="card-title">Điểm cần nhớ</div>
+    <ul class="points">
+      ${p.points.map(pt => `<li><span class="dot" style="background:${p.color}"></span>${pt}</li>`).join('')}
+    </ul>
+    <div style="font-size:11px;color:var(--text3);margin-top:6px;padding:6px 8px;background:var(--bg2);border-radius:5px">${p.outputNote}</div>
+  `;
+
+  // Detail code
+  document.getElementById('detail-code').innerHTML = `
+    <div class="card-title">Ví dụ code</div>
+    <div class="code">${p.code}</div>
+  `;
+}
+
+buildSpecial();
+selectPhase('timers');
+</script>
+</body>
+</html>
