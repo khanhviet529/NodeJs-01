@@ -1,0 +1,1214 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Render Pipeline Simulator</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap');
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0a0f;
+  --bg2:#111118;
+  --bg3:#1a1a24;
+  --surface:#1e1e2a;
+  --border:rgba(255,255,255,0.07);
+  --border2:rgba(255,255,255,0.12);
+  --text:#e8e6f0;
+  --text2:#9896a8;
+  --text3:#5a5868;
+  --mono:'JetBrains Mono',monospace;
+  --sans:'Syne',sans-serif;
+  --c-parse:#4ade80;
+  --c-style:#a78bfa;
+  --c-layout:#fb923c;
+  --c-paint:#38bdf8;
+  --c-composite:#f472b6;
+  --c-gpu:#fbbf24;
+}
+
+body{
+  font-family:var(--mono);
+  background:var(--bg);
+  color:var(--text);
+  min-height:100vh;
+  padding:20px;
+  font-size:12px;
+  line-height:1.6;
+}
+
+/* ── Header ── */
+.header{margin-bottom:20px}
+.header h1{
+  font-family:var(--sans);
+  font-size:22px;
+  font-weight:800;
+  letter-spacing:-.02em;
+  margin-bottom:4px;
+  background:linear-gradient(135deg,#e8e6f0 0%,#a78bfa 50%,#38bdf8 100%);
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  background-clip:text;
+}
+.header p{color:var(--text3);font-size:11px}
+
+/* ── Pipeline bar ── */
+.pipeline-bar{
+  display:flex;
+  gap:2px;
+  margin-bottom:16px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  overflow:hidden;
+  height:36px;
+}
+.pipe-seg{
+  flex:1;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:.05em;
+  cursor:pointer;
+  transition:all .2s;
+  border-right:1px solid var(--border);
+  opacity:.35;
+  font-family:var(--sans);
+}
+.pipe-seg:last-child{border-right:none}
+.pipe-seg.active{opacity:1}
+.pipe-seg.done{opacity:.6}
+.pipe-seg:hover{opacity:.8}
+.pipe-seg.s-parse{background:rgba(74,222,128,.12);color:var(--c-parse)}
+.pipe-seg.s-style{background:rgba(167,139,250,.12);color:var(--c-style)}
+.pipe-seg.s-layout{background:rgba(251,146,60,.12);color:var(--c-layout)}
+.pipe-seg.s-paint{background:rgba(56,189,248,.12);color:var(--c-paint)}
+.pipe-seg.s-composite{background:rgba(244,114,182,.12);color:var(--c-composite)}
+.pipe-seg.s-screen{background:rgba(251,191,36,.12);color:var(--c-gpu)}
+
+/* ── Main grid ── */
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px}
+@media(max-width:700px){.grid,.grid3{grid-template-columns:1fr}}
+
+/* ── Cards ── */
+.card{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:14px;
+  position:relative;
+  overflow:hidden;
+}
+.card::before{
+  content:'';
+  position:absolute;
+  top:0;left:0;right:0;
+  height:2px;
+  opacity:0;
+  transition:opacity .3s;
+}
+.card.active::before{opacity:1}
+.card.c-parse::before{background:var(--c-parse)}
+.card.c-style::before{background:var(--c-style)}
+.card.c-layout::before{background:var(--c-layout)}
+.card.c-paint::before{background:var(--c-paint)}
+.card.c-composite::before{background:var(--c-composite)}
+.card.c-gpu::before{background:var(--c-gpu)}
+
+.card-label{
+  font-family:var(--sans);
+  font-size:10px;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.1em;
+  color:var(--text3);
+  margin-bottom:8px;
+}
+.card-title{
+  font-family:var(--sans);
+  font-size:14px;
+  font-weight:700;
+  margin-bottom:6px;
+}
+
+/* ── DOM Tree visual ── */
+.tree{font-size:11px;line-height:2}
+.tree-node{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:2px 6px;
+  border-radius:4px;
+  transition:background .15s;
+  cursor:default;
+}
+.tree-node.highlight{background:rgba(74,222,128,.15);color:var(--c-parse)}
+.tree-node.tag{color:#7dd3fc}
+.tree-node.attr{color:#86efac;font-size:10px}
+.tree-node.text{color:#fde68a;font-size:10px;font-style:italic}
+.indent1{padding-left:16px}
+.indent2{padding-left:32px}
+.indent3{padding-left:48px}
+
+/* ── CSSOM visual ── */
+.rule{margin-bottom:8px;border-left:2px solid var(--border2);padding-left:8px;transition:border-color .3s}
+.rule.highlight{border-color:var(--c-style)}
+.rule-sel{color:var(--c-style);font-size:11px}
+.rule-prop{color:var(--text2);font-size:10px;padding-left:8px}
+.rule-prop span{color:var(--c-paint)}
+
+/* ── Box model visual ── */
+.box-model{
+  position:relative;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  width:100%;
+  height:140px;
+}
+.bm-layer{
+  position:absolute;
+  border-radius:6px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:9px;
+  font-weight:700;
+  font-family:var(--sans);
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  transition:all .4s;
+}
+.bm-margin{width:100%;height:100%;border:2px dashed rgba(251,146,60,.4);color:rgba(251,146,60,.5);align-items:flex-start;justify-content:flex-start;padding:4px 6px}
+.bm-border{width:82%;height:78%;background:rgba(251,146,60,.08);border:2px solid rgba(251,146,60,.5);color:rgba(251,146,60,.7)}
+.bm-padding{width:62%;height:58%;background:rgba(251,146,60,.12);border:1px solid rgba(251,146,60,.3);color:rgba(251,146,60,.5)}
+.bm-content{width:42%;height:40%;background:rgba(251,146,60,.2);border:1px solid rgba(251,146,60,.5);color:rgba(251,146,60,.9)}
+
+/* ── Paint layers ── */
+.layer-stack{display:flex;flex-direction:column;gap:4px}
+.paint-layer{
+  border-radius:6px;
+  padding:7px 10px;
+  font-size:10px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  border:1px solid var(--border);
+  transition:all .3s;
+  opacity:.3;
+}
+.paint-layer.visible{opacity:1}
+.paint-layer .layer-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.paint-layer .layer-preview{
+  width:30px;height:14px;border-radius:3px;flex-shrink:0;
+  border:1px solid rgba(255,255,255,.1);
+}
+
+/* ── Composite visual ── */
+.composite-wrap{position:relative;height:120px;margin-top:8px}
+.comp-layer{
+  position:absolute;
+  border-radius:6px;
+  font-size:9px;
+  font-family:var(--sans);
+  font-weight:700;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  transition:all .5s;
+  border:1px solid rgba(255,255,255,.1);
+  opacity:0;
+}
+.comp-layer.visible{opacity:1}
+
+/* ── Screen output ── */
+.screen-preview{
+  border:1px solid var(--border2);
+  border-radius:8px;
+  overflow:hidden;
+  background:#fff;
+  transition:all .4s;
+}
+.screen-inner{padding:12px;font-family:Georgia,serif}
+.sc-h1{font-size:16px;font-weight:700;color:#1a1a18;margin-bottom:4px}
+.sc-p{font-size:11px;color:#444;margin-bottom:6px;line-height:1.5}
+.sc-btn{
+  display:inline-block;
+  padding:5px 12px;
+  background:#7F77DD;
+  color:#fff;
+  border-radius:4px;
+  font-size:10px;
+  font-family:system-ui,sans-serif;
+}
+
+/* ── Explain panel ── */
+.explain{
+  background:var(--bg3);
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:14px;
+  margin-bottom:12px;
+  min-height:70px;
+  transition:all .3s;
+}
+.explain-phase{
+  font-family:var(--sans);
+  font-size:11px;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.1em;
+  margin-bottom:6px;
+}
+.explain-text{
+  font-size:11px;
+  color:var(--text2);
+  line-height:1.75;
+  white-space:pre-line;
+}
+
+/* ── Controls ── */
+.controls{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  flex-wrap:wrap;
+  margin-bottom:16px;
+}
+.btn{
+  padding:7px 16px;
+  border-radius:7px;
+  border:1px solid var(--border2);
+  background:var(--surface);
+  color:var(--text);
+  cursor:pointer;
+  font-family:var(--mono);
+  font-size:11px;
+  transition:all .15s;
+}
+.btn:hover{background:var(--bg3);border-color:rgba(255,255,255,.2)}
+.btn.primary{
+  background:linear-gradient(135deg,#a78bfa,#38bdf8);
+  color:#0a0a0f;
+  border:none;
+  font-weight:700;
+}
+.btn.primary:hover{opacity:.9}
+.step-counter{
+  font-size:11px;
+  color:var(--text3);
+  margin-left:auto;
+}
+
+/* ── Trigger selector ── */
+.trigger-row{
+  display:flex;
+  gap:6px;
+  flex-wrap:wrap;
+  margin-bottom:12px;
+}
+.trigger-btn{
+  padding:4px 10px;
+  border-radius:20px;
+  border:1px solid var(--border2);
+  background:var(--bg3);
+  color:var(--text2);
+  cursor:pointer;
+  font-size:10px;
+  font-family:var(--mono);
+  transition:all .15s;
+}
+.trigger-btn.on{color:#0a0a0f;border-color:transparent;font-weight:700}
+.trigger-btn:hover{color:var(--text)}
+
+/* ── Performance bar ── */
+.perf-wrap{margin-bottom:12px}
+.perf-label{font-size:10px;color:var(--text3);margin-bottom:6px;font-family:var(--sans);font-weight:600;text-transform:uppercase;letter-spacing:.08em}
+.perf-row{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.perf-name{width:100px;font-size:10px;color:var(--text2);flex-shrink:0}
+.perf-bar-wrap{flex:1;height:8px;background:var(--bg3);border-radius:4px;overflow:hidden}
+.perf-bar{height:100%;border-radius:4px;transition:width .6s;width:0}
+.perf-val{width:40px;font-size:10px;color:var(--text2);text-align:right;flex-shrink:0}
+
+/* ── Dirty flag visual ── */
+.dirty-wrap{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.dirty-node{
+  padding:3px 8px;
+  border-radius:4px;
+  font-size:10px;
+  border:1px solid var(--border);
+  color:var(--text3);
+  transition:all .3s;
+}
+.dirty-node.dirty{border-color:#fb923c;color:#fb923c;background:rgba(251,146,60,.1)}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+
+/* ── Animations ── */
+@keyframes pulse-in{0%{opacity:0;transform:scale(.97)}100%{opacity:1;transform:scale(1)}}
+@keyframes slide-in{0%{opacity:0;transform:translateY(6px)}100%{opacity:1;transform:translateY(0)}}
+.anim-in{animation:pulse-in .3s ease}
+.anim-slide{animation:slide-in .3s ease}
+
+@keyframes scan{0%{transform:translateY(-100%)}100%{transform:translateY(400%)}}
+.scanner{
+  position:absolute;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--c-parse),transparent);
+  animation:scan .8s ease;
+  pointer-events:none;
+}
+
+/* ── Tag ── */
+.tag{
+  display:inline-block;padding:1px 6px;border-radius:4px;
+  font-size:9px;font-weight:700;font-family:var(--sans);
+  text-transform:uppercase;letter-spacing:.06em;margin-left:4px;
+}
+.tag-skip{background:rgba(74,222,128,.15);color:var(--c-parse)}
+.tag-trig{background:rgba(251,146,60,.15);color:var(--c-layout)}
+.tag-heavy{background:rgba(244,114,182,.15);color:var(--c-composite)}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Render Pipeline</h1>
+  <p>Mô phỏng từng bước trình duyệt vẽ trang — từ HTML thô đến pixels trên màn hình</p>
+</div>
+
+<!-- Trigger selector -->
+<div style="font-size:10px;color:var(--text3);margin-bottom:6px;font-family:var(--sans);font-weight:600;text-transform:uppercase;letter-spacing:.08em">Kịch bản</div>
+<div class="trigger-row" id="trigger-row">
+  <button class="trigger-btn on" onclick="setScenario('initial')" id="trg-initial" style="background:rgba(167,139,250,.2);color:#a78bfa;border-color:#a78bfa">Tải trang lần đầu</button>
+  <button class="trigger-btn" onclick="setScenario('color')" id="trg-color">Đổi color/background</button>
+  <button class="trigger-btn" onclick="setScenario('width')" id="trg-width">Đổi width/height</button>
+  <button class="trigger-btn" onclick="setScenario('transform')" id="trg-transform">Đổi transform/opacity</button>
+  <button class="trigger-btn" onclick="setScenario('display')" id="trg-display">Đổi display:none</button>
+</div>
+
+<!-- Pipeline progress bar -->
+<div class="pipeline-bar" id="pipeline-bar">
+  <div class="pipe-seg s-parse" onclick="jumpTo(0)">Parse</div>
+  <div class="pipe-seg s-style" onclick="jumpTo(1)">Style</div>
+  <div class="pipe-seg s-layout" onclick="jumpTo(2)">Layout</div>
+  <div class="pipe-seg s-paint" onclick="jumpTo(3)">Paint</div>
+  <div class="pipe-seg s-composite" onclick="jumpTo(4)">Composite</div>
+  <div class="pipe-seg s-screen" onclick="jumpTo(5)">Screen</div>
+</div>
+
+<!-- Explain panel -->
+<div class="explain" id="explain">
+  <div class="explain-phase" id="explain-phase" style="color:#a78bfa">Sẵn sàng</div>
+  <div class="explain-text" id="explain-text">Chọn kịch bản và bấm "Tiếp →" để bắt đầu mô phỏng render pipeline.</div>
+</div>
+
+<!-- Controls -->
+<div class="controls">
+  <button class="btn" onclick="prev()">← Trước</button>
+  <button class="btn primary" onclick="next()">Tiếp →</button>
+  <button class="btn" onclick="resetSim()">↺ Reset</button>
+  <span class="step-counter" id="step-counter">Bước 0 / 0</span>
+</div>
+
+<!-- Step content panels -->
+<div id="step-content"></div>
+
+<!-- Performance comparison -->
+<div class="perf-wrap">
+  <div class="perf-label">Chi phí render — so sánh kịch bản</div>
+  <div class="perf-row">
+    <div class="perf-name">transform/opacity</div>
+    <div class="perf-bar-wrap"><div class="perf-bar" id="pb-transform" style="background:#4ade80;width:8%"></div></div>
+    <div class="perf-val" id="pv-transform">~0.1ms</div>
+  </div>
+  <div class="perf-row">
+    <div class="perf-name">color/background</div>
+    <div class="perf-bar-wrap"><div class="perf-bar" id="pb-color" style="background:#38bdf8;width:25%"></div></div>
+    <div class="perf-val" id="pv-color">~1ms</div>
+  </div>
+  <div class="perf-row">
+    <div class="perf-name">width/height</div>
+    <div class="perf-bar-wrap"><div class="perf-bar" id="pb-width" style="background:#fb923c;width:65%"></div></div>
+    <div class="perf-val" id="pv-width">~4ms</div>
+  </div>
+  <div class="perf-row">
+    <div class="perf-name">display:none</div>
+    <div class="perf-bar-wrap"><div class="perf-bar" id="pb-display" style="background:#f472b6;width:90%"></div></div>
+    <div class="perf-val" id="pv-display">~8ms</div>
+  </div>
+</div>
+
+<script>
+/* ════════════════════════════════════
+   DATA — scenarios & steps
+════════════════════════════════════ */
+const scenarios = {
+  initial: {
+    label:'Tải trang lần đầu',
+    steps:[
+      {
+        phase:'Parse HTML + CSS', color:'var(--c-parse)', seg:0,
+        explain:'HTML Parser đọc từng byte từ server, xây DOM Tree.\nCSS Parser đọc stylesheet, xây CSSOM Tree.\nHai cây này là nguyên liệu thô — chưa biết gì về vị trí hay màu sắc cuối cùng.',
+        render: renderParse
+      },
+      {
+        phase:'Style Calculation', color:'var(--c-style)', seg:1,
+        explain:'Kết hợp DOM Tree + CSSOM Tree.\nVới mỗi node trong DOM: tìm rule nào khớp (selector matching), giải quyết specificity & cascade, áp dụng inheritance, resolve relative values (em → px, % → px, var() → giá trị thực).\n→ Kết quả: Computed Style cho mỗi node.',
+        render: renderStyle
+      },
+      {
+        phase:'Layout (Reflow)', color:'var(--c-layout)', seg:2,
+        explain:'Dùng Computed Style để tính toán box model của từng element:\n• Vị trí tuyệt đối (x, y) trên trang\n• Kích thước thực (width, height sau khi giải quyết flex, grid, %, auto)\n• Tác động lẫn nhau (element này đẩy element kia, float, wrapping text)\n\nĐây là bước tốn kém nhất — một thay đổi có thể kéo theo tính toán lại toàn bộ trang.',
+        render: renderLayout
+      },
+      {
+        phase:'Paint', color:'var(--c-paint)', seg:3,
+        explain:'Với tọa độ và kích thước đã có từ Layout, trình duyệt tạo "paint records" — danh sách lệnh vẽ cho từng layer:\n1. Background color\n2. Background image\n3. Border\n4. Text / content\n5. Outline\n\nPaint KHÔNG tạo pixel ngay — nó tạo instructions cho GPU.',
+        render: renderPaint
+      },
+      {
+        phase:'Composite', color:'var(--c-composite)', seg:4,
+        explain:'GPU nhận paint records, ghép tất cả các layer lại theo đúng thứ tự z-index.\nCác layer đặc biệt (transform, opacity, will-change) được xử lý hoàn toàn trên GPU — không cần quay lại CPU.\n\nĐây là lý do transform và opacity nhanh nhất: chúng chỉ trigger bước này.',
+        render: renderComposite
+      },
+      {
+        phase:'Screen — Pixels hiển thị', color:'var(--c-gpu)', seg:5,
+        explain:'Frame hoàn chỉnh được đưa lên màn hình.\nTrình duyệt target 60fps = mỗi frame phải xong trong 16ms.\nNếu toàn bộ pipeline mất hơn 16ms → frame drop → người dùng thấy giật.',
+        render: renderScreen
+      }
+    ]
+  },
+  color: {
+    label:'Đổi color/background',
+    steps:[
+      {
+        phase:'JS thay đổi style', color:'var(--c-parse)', seg:-1,
+        explain:'JavaScript: element.style.backgroundColor = "#ff0000"\n→ Trình duyệt đánh dấu node là "dirty" (cần cập nhật)\n→ Lên lịch render ở frame tiếp theo (~16ms)',
+        render: renderDirty
+      },
+      {
+        phase:'Style Calculation', color:'var(--c-style)', seg:1,
+        explain:'Tính lại computed style cho node bị dirty.\nChỉ style thay đổi — không ảnh hưởng kích thước, vị trí.\n→ Layout KHÔNG cần chạy lại (skip!)',
+        render: renderStyleOnly
+      },
+      {
+        phase:'Paint', color:'var(--c-paint)', seg:3,
+        explain:'Chỉ repaint vùng bị ảnh hưởng (invalidation region).\nTrình duyệt thông minh: chỉ vẽ lại phần thay đổi, không vẽ lại toàn trang.\n→ Chi phí thấp hơn nhiều so với full reflow.',
+        render: renderPaintOnly
+      },
+      {
+        phase:'Composite', color:'var(--c-composite)', seg:4,
+        explain:'Ghép lại các layer và hiển thị lên màn hình.\nPipeline: Style → Paint → Composite (bỏ qua Layout)\nChi phí: trung bình ~1ms',
+        render: renderComposite
+      }
+    ]
+  },
+  width: {
+    label:'Đổi width/height',
+    steps:[
+      {
+        phase:'JS thay đổi kích thước', color:'var(--c-parse)', seg:-1,
+        explain:'JavaScript: element.style.width = "500px"\n→ Thay đổi kích thước → ảnh hưởng đến vị trí các element xung quanh\n→ Phải chạy lại TOÀN BỘ pipeline từ Style!',
+        render: renderDirtyFull
+      },
+      {
+        phase:'Style Calculation', color:'var(--c-style)', seg:1,
+        explain:'Tính lại computed style — width mới cần được resolve.\nCác element con có width:100% cũng bị ảnh hưởng.\n→ Cascade có thể lan rộng.',
+        render: renderStyleOnly
+      },
+      {
+        phase:'Layout (Reflow)', color:'var(--c-layout)', seg:2,
+        explain:'⚠ REFLOW xảy ra — đây là bước tốn kém nhất!\nThay đổi width của 1 element có thể:\n• Đẩy các element khác dịch chuyển\n• Thay đổi chiều cao của container cha\n• Trigger reflow lan xuống toàn bộ subtree\n• Thậm chí reflow toàn trang\n\nForced reflow: đọc offsetWidth/offsetHeight sau khi thay đổi style → trình duyệt phải tính ngay, không thể batch.',
+        render: renderLayoutFull
+      },
+      {
+        phase:'Paint', color:'var(--c-paint)', seg:3,
+        explain:'Repaint vùng lớn hơn vì nhiều element đã dịch chuyển.\nChi phí cao hơn trường hợp chỉ đổi màu.',
+        render: renderPaintOnly
+      },
+      {
+        phase:'Composite', color:'var(--c-composite)', seg:4,
+        explain:'Ghép layer và hiển thị.\nPipeline đầy đủ: Style → Layout → Paint → Composite\nChi phí: cao ~4-8ms, dễ drop frame nếu nhiều element bị ảnh hưởng.',
+        render: renderComposite
+      }
+    ]
+  },
+  transform: {
+    label:'Đổi transform/opacity',
+    steps:[
+      {
+        phase:'JS thay đổi transform', color:'var(--c-parse)', seg:-1,
+        explain:'JavaScript: element.style.transform = "translateX(100px)"\n→ Transform và opacity được xử lý HOÀN TOÀN trên GPU\n→ Không cần Style, Layout, hay Paint!\n→ Chỉ trigger Composite layer.',
+        render: renderDirtyGPU
+      },
+      {
+        phase:'Composite (GPU only)', color:'var(--c-composite)', seg:4,
+        explain:'GPU nhận lệnh: "dịch chuyển layer này 100px sang phải"\nKhông cần CPU tính toán gì thêm.\nKhông cần recalculate style.\nKhông cần layout.\nKhông cần repaint.\n\n→ Pipeline: Composite only\n→ Chi phí: cực thấp ~0.1ms\n→ Lý do animation nên dùng transform thay vì left/top!',
+        render: renderGPUOnly
+      }
+    ]
+  },
+  display: {
+    label:'Đổi display:none',
+    steps:[
+      {
+        phase:'JS: display = "none"', color:'var(--c-parse)', seg:-1,
+        explain:'JavaScript: element.style.display = "none"\n→ Element bị XÓA khỏi Render Tree (không còn tồn tại trong luồng document)\n→ Khác visibility:hidden (vẫn còn trong Render Tree, chỉ không hiển thị)\n→ Pipeline đầy đủ bắt buộc phải chạy lại!',
+        render: renderDirtyDisplay
+      },
+      {
+        phase:'Style Calculation', color:'var(--c-style)', seg:1,
+        explain:'Recalculate style — node với display:none bị loại khỏi Render Tree.\nCác sibling và parent có thể bị ảnh hưởng (collapsed space).',
+        render: renderStyleDisplay
+      },
+      {
+        phase:'Layout (Reflow toàn trang)', color:'var(--c-layout)', seg:2,
+        explain:'⚠ HEAVY REFLOW!\ndisplay:none xóa element ra khỏi document flow.\nTất cả element xung quanh phải tính lại vị trí.\nNếu element lớn → reflow cả trang.\n\n→ Đây là lý do nên dùng visibility:hidden hoặc opacity:0 thay vì display:none khi animate.',
+        render: renderLayoutDisplay
+      },
+      {
+        phase:'Paint', color:'var(--c-paint)', seg:3,
+        explain:'Repaint vùng cũ của element vừa bị ẩn.\nRepaint vùng của các element đã dịch chuyển.',
+        render: renderPaintOnly
+      },
+      {
+        phase:'Composite', color:'var(--c-composite)', seg:4,
+        explain:'Ghép layer và hiển thị.\nPipeline đầy đủ: Style → Layout → Paint → Composite\nChi phí: cao nhất ~8ms+\nDùng requestAnimationFrame để batch nhiều display:none lại.',
+        render: renderComposite
+      }
+    ]
+  }
+};
+
+/* ════════════════════════════════════
+   STATE
+════════════════════════════════════ */
+let currentScenario = 'initial';
+let currentStep = -1;
+
+function getSteps(){ return scenarios[currentScenario].steps; }
+
+/* ════════════════════════════════════
+   RENDER FUNCTIONS — each step
+════════════════════════════════════ */
+
+function renderParse(){
+  return `
+  <div class="grid">
+    <div class="card c-parse active anim-in">
+      <div class="card-label">DOM Tree</div>
+      <div class="tree" id="dom-tree">
+        <div class="tree-node tag">&lt;html&gt;</div>
+        <div class="tree-node tag indent1">&lt;head&gt;</div>
+        <div class="tree-node tag indent2">&lt;title&gt;</div>
+        <div class="tree-node text indent3">"My Page"</div>
+        <div class="tree-node tag indent1">&lt;body&gt;</div>
+        <div class="tree-node tag indent2">&lt;h1 class="title"&gt;</div>
+        <div class="tree-node text indent3">"Hello World"</div>
+        <div class="tree-node tag indent2">&lt;p class="desc"&gt;</div>
+        <div class="tree-node text indent3">"Paragraph text"</div>
+        <div class="tree-node tag indent2">&lt;button id="cta"&gt;</div>
+        <div class="tree-node text indent3">"Click me"</div>
+      </div>
+      <div id="scanner-wrap" style="position:relative;height:0;overflow:visible">
+        <div class="scanner" id="dom-scanner"></div>
+      </div>
+    </div>
+    <div class="card anim-in" style="animation-delay:.1s">
+      <div class="card-label">CSSOM Tree</div>
+      <div class="rule">
+        <div class="rule-sel">* { }</div>
+        <div class="rule-prop">box-sizing: <span>border-box</span></div>
+      </div>
+      <div class="rule">
+        <div class="rule-sel">h1.title { }</div>
+        <div class="rule-prop">font-size: <span>24px</span></div>
+        <div class="rule-prop">color: <span>#1a1a18</span></div>
+        <div class="rule-prop">margin-bottom: <span>8px</span></div>
+      </div>
+      <div class="rule">
+        <div class="rule-sel">p.desc { }</div>
+        <div class="rule-prop">color: <span>#666</span></div>
+        <div class="rule-prop">line-height: <span>1.6</span></div>
+      </div>
+      <div class="rule">
+        <div class="rule-sel">#cta { }</div>
+        <div class="rule-prop">background: <span>#7F77DD</span></div>
+        <div class="rule-prop">padding: <span>8px 16px</span></div>
+        <div class="rule-prop">border-radius: <span>4px</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="card anim-in" style="animation-delay:.2s">
+    <div class="card-label">Quá trình parsing</div>
+    <div style="display:flex;gap:20px;flex-wrap:wrap">
+      <div style="flex:1;min-width:180px">
+        <div style="font-size:10px;color:var(--c-parse);font-weight:700;margin-bottom:6px">HTML Parser</div>
+        <div style="font-size:10px;color:var(--text2);line-height:1.8">
+          bytes → characters<br>
+          characters → tokens<br>
+          tokens → nodes<br>
+          nodes → DOM Tree
+        </div>
+      </div>
+      <div style="flex:1;min-width:180px">
+        <div style="font-size:10px;color:var(--c-style);font-weight:700;margin-bottom:6px">CSS Parser</div>
+        <div style="font-size:10px;color:var(--text2);line-height:1.8">
+          bytes → characters<br>
+          characters → tokens<br>
+          tokens → rules<br>
+          rules → CSSOM Tree
+        </div>
+      </div>
+      <div style="flex:1;min-width:180px">
+        <div style="font-size:10px;color:var(--text3);font-weight:700;margin-bottom:6px">Lưu ý</div>
+        <div style="font-size:10px;color:var(--text2);line-height:1.8">
+          CSS blocking — parser dừng khi<br>
+          gặp &lt;link&gt; stylesheet<br>
+          Script không defer → cũng block<br>
+          display:none → vẫn parse, không render
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderStyle(){
+  return `
+  <div class="grid">
+    <div class="card anim-in">
+      <div class="card-label">Selector Matching + Cascade</div>
+      <div class="rule highlight">
+        <div class="rule-sel">h1.title — specificity: 0,1,1</div>
+        <div class="rule-prop">font-size: <span>24px</span> ← wins</div>
+        <div class="rule-prop">color: <span>#1a1a18</span> ← wins</div>
+      </div>
+      <div class="rule" style="opacity:.5">
+        <div class="rule-sel">h1 — specificity: 0,0,1 ← loses</div>
+        <div class="rule-prop">font-size: <span>20px</span> ← overridden</div>
+      </div>
+      <div class="rule highlight">
+        <div class="rule-sel">#cta — specificity: 1,0,0</div>
+        <div class="rule-prop">background: <span>#7F77DD</span></div>
+      </div>
+      <div style="margin-top:10px;font-size:10px;color:var(--text2)">Specificity: ID(1,0,0) > Class(0,1,0) > Tag(0,0,1)</div>
+    </div>
+    <div class="card anim-in" style="animation-delay:.1s">
+      <div class="card-label">Computed Style — &lt;h1&gt;</div>
+      <div style="font-size:10px;color:var(--text2);line-height:2">
+        <div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:2px 0"><span style="color:var(--c-style)">font-size</span><span style="color:var(--c-paint)">24px</span></div>
+        <div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:2px 0"><span style="color:var(--c-style)">color</span><span style="color:var(--c-paint)">#1a1a18 → rgb(26,26,24)</span></div>
+        <div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:2px 0"><span style="color:var(--c-style)">margin-bottom</span><span style="color:var(--c-paint)">8px</span></div>
+        <div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:2px 0"><span style="color:var(--c-style)">line-height</span><span style="color:var(--c-paint)">1.6 → 38.4px</span></div>
+        <div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:2px 0"><span style="color:var(--c-style)">display</span><span style="color:var(--c-paint)">block (inherited)</span></div>
+        <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:var(--c-style)">font-family</span><span style="color:var(--c-paint)">Georgia (inherited)</span></div>
+      </div>
+      <div style="margin-top:8px;padding:6px;background:var(--bg3);border-radius:5px;font-size:10px;color:var(--text3)">
+        getComputedStyle(h1).fontSize → "24px" ✓
+      </div>
+    </div>
+  </div>
+  <div class="card anim-in" style="animation-delay:.2s">
+    <div class="card-label">4 bước Style Calculation</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+      ${['① Selector matching<br><span style="color:var(--text3)">rule nào khớp node nào</span>','② Cascade<br><span style="color:var(--text3)">specificity ai thắng</span>','③ Inheritance<br><span style="color:var(--text3)">color, font lan xuống con</span>','④ Resolve values<br><span style="color:var(--text3)">em→px, %→px, var()→value</span>'].map(t=>`<div style="background:rgba(167,139,250,.08);border:1px solid rgba(167,139,250,.2);border-radius:6px;padding:8px;font-size:10px;color:var(--text2);line-height:1.6">${t}</div>`).join('')}
+    </div>
+  </div>`;
+}
+
+function renderLayout(){
+  return `
+  <div class="grid">
+    <div class="card anim-in">
+      <div class="card-label">Box Model — &lt;h1&gt;</div>
+      <div class="box-model">
+        <div class="bm-layer bm-margin">margin</div>
+        <div class="bm-layer bm-border">border</div>
+        <div class="bm-layer bm-padding">padding</div>
+        <div class="bm-layer bm-content">content<br><span style="font-size:8px;opacity:.7">w×h</span></div>
+      </div>
+    </div>
+    <div class="card anim-in" style="animation-delay:.1s">
+      <div class="card-label">Computed Layout — tọa độ tuyệt đối</div>
+      <div style="font-size:10px;color:var(--text2);line-height:2.2">
+        <div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:2px 0"><span>&lt;body&gt;</span><span style="color:var(--c-layout)">x:0 y:0 w:1440 h:auto</span></div>
+        <div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:2px 0"><span>h1.title</span><span style="color:var(--c-layout)">x:16 y:16 w:1408 h:38</span></div>
+        <div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:2px 0"><span>p.desc</span><span style="color:var(--c-layout)">x:16 y:62 w:1408 h:48</span></div>
+        <div style="display:flex;justify-content:space-between;padding:2px 0"><span>#cta</span><span style="color:var(--c-layout)">x:16 y:118 w:96 h:32</span></div>
+      </div>
+      <div style="margin-top:8px;padding:6px;background:rgba(251,146,60,.08);border-radius:5px;font-size:10px;color:#fb923c">
+        ⚠ element.offsetWidth → forced reflow!
+      </div>
+    </div>
+  </div>
+  <div class="card anim-in" style="animation-delay:.2s">
+    <div class="card-label">Layout tính toán</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div style="font-size:10px;color:var(--text2);line-height:1.8">
+        <div style="color:var(--c-layout);font-weight:700;margin-bottom:4px">Inputs</div>
+        Computed Style (width, height, margin...)<br>
+        Kích thước viewport<br>
+        Nội dung (text, images)<br>
+        Flex/Grid constraints
+      </div>
+      <div style="font-size:10px;color:var(--text2);line-height:1.8">
+        <div style="color:var(--c-layout);font-weight:700;margin-bottom:4px">Outputs</div>
+        x, y tuyệt đối cho mỗi element<br>
+        width, height đã resolved<br>
+        Line breaks cho text<br>
+        Overflow regions
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderPaint(){
+  return `
+  <div class="grid">
+    <div class="card anim-in">
+      <div class="card-label">Paint Layers — thứ tự vẽ</div>
+      <div class="layer-stack" id="layer-stack">
+        <div class="paint-layer" id="pl-1">
+          <div class="layer-dot" style="background:#1a1a18"></div>
+          <div class="layer-preview" style="background:#1a1a18"></div>
+          <span style="color:var(--text2)">1. Background color — body</span>
+        </div>
+        <div class="paint-layer" id="pl-2">
+          <div class="layer-dot" style="background:#666"></div>
+          <div class="layer-preview" style="background:linear-gradient(#333 2px,transparent 0) 0 0/100% 20px"></div>
+          <span style="color:var(--text2)">2. Text — h1 "Hello World"</span>
+        </div>
+        <div class="paint-layer" id="pl-3">
+          <div class="layer-dot" style="background:#888"></div>
+          <div class="layer-preview" style="background:repeating-linear-gradient(#555 0,#555 1px,transparent 0,transparent 4px)"></div>
+          <span style="color:var(--text2)">3. Text — p "Paragraph..."</span>
+        </div>
+        <div class="paint-layer" id="pl-4">
+          <div class="layer-dot" style="background:#7F77DD"></div>
+          <div class="layer-preview" style="background:#7F77DD;border-radius:2px"></div>
+          <span style="color:var(--text2)">4. Background — #cta button</span>
+        </div>
+        <div class="paint-layer" id="pl-5">
+          <div class="layer-dot" style="background:#fff"></div>
+          <div class="layer-preview" style="background:linear-gradient(#fff 2px,transparent 0) 0 0/100% 20px"></div>
+          <span style="color:var(--text2)">5. Text — "Click me"</span>
+        </div>
+      </div>
+    </div>
+    <div class="card anim-in" style="animation-delay:.1s">
+      <div class="card-label">Paint Records (lệnh vẽ)</div>
+      <div style="font-size:10px;font-family:var(--mono);color:var(--text2);line-height:2">
+        <div style="color:var(--text3)">// GPU display list</div>
+        <div>drawRect(0,0,1440,800, <span style="color:#7dd3fc">#fff</span>)</div>
+        <div>drawText(16,16, <span style="color:#fde68a">"Hello"</span>, 24px)</div>
+        <div>drawText(16,62, <span style="color:#fde68a">"Para..."</span>, 14px)</div>
+        <div>drawRoundRect(16,118,96,32, <span style="color:#7dd3fc">#7F77DD</span>, r=4)</div>
+        <div>drawText(28,130, <span style="color:#fde68a">"Click"</span>, 12px, <span style="color:#7dd3fc">#fff</span>)</div>
+      </div>
+      <div style="margin-top:8px;padding:6px;background:rgba(56,189,248,.08);border-radius:5px;font-size:10px;color:#38bdf8">
+        Paint tạo instructions — pixel thực tế do GPU tạo ở Composite
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderComposite(){
+  return `
+  <div class="grid">
+    <div class="card anim-in">
+      <div class="card-label">Layer compositing</div>
+      <div class="composite-wrap" id="comp-wrap">
+        <div class="comp-layer visible" style="left:0;top:0;width:100%;height:36px;background:rgba(30,30,40,.9);border-color:rgba(74,222,128,.3);color:#4ade80;font-size:9px">Base layer (document)</div>
+        <div class="comp-layer visible" style="left:4px;top:40px;width:90%;height:32px;background:rgba(167,139,250,.15);border-color:rgba(167,139,250,.4);color:#a78bfa;font-size:9px">Stacking context (z-index)</div>
+        <div class="comp-layer visible" style="left:8px;top:76px;width:60%;height:30px;background:rgba(244,114,182,.15);border-color:rgba(244,114,182,.4);color:#f472b6;font-size:9px">Transform layer (GPU)</div>
+        <div class="comp-layer visible" style="right:4px;top:40px;width:36%;height:66px;background:rgba(251,191,36,.1);border-color:rgba(251,191,36,.3);color:#fbbf24;font-size:9px">Fixed position layer</div>
+      </div>
+    </div>
+    <div class="card anim-in" style="animation-delay:.1s">
+      <div class="card-label">GPU xử lý</div>
+      <div style="font-size:10px;color:var(--text2);line-height:1.9">
+        <div style="color:var(--c-composite);font-weight:700;margin-bottom:6px">Tại sao tách layer?</div>
+        <div style="margin-bottom:8px">transform, opacity, will-change → promoted lên GPU layer riêng. GPU xử lý độc lập, không cần CPU recalculate.</div>
+        <div style="color:var(--c-composite);font-weight:700;margin-bottom:6px">Thứ tự ghép</div>
+        <div>1. Background layers<br>2. Normal flow (z-index: auto)<br>3. Positioned elements<br>4. Fixed/sticky layers<br>5. Overlay/modal layers</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderScreen(){
+  return `
+  <div class="grid">
+    <div class="card anim-in">
+      <div class="card-label">Frame output — màn hình</div>
+      <div class="screen-preview">
+        <div class="screen-inner">
+          <div class="sc-h1">Hello World</div>
+          <div class="sc-p">Paragraph text that wraps naturally based on the computed layout width and font metrics calculated during the layout phase.</div>
+          <div class="sc-btn">Click me</div>
+        </div>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+        <div style="padding:4px 8px;background:rgba(74,222,128,.1);border-radius:4px;font-size:10px;color:#4ade80">60fps = 16ms/frame</div>
+        <div style="padding:4px 8px;background:rgba(56,189,248,.1);border-radius:4px;font-size:10px;color:#38bdf8">Frame hoàn chỉnh ✓</div>
+      </div>
+    </div>
+    <div class="card anim-in" style="animation-delay:.1s">
+      <div class="card-label">Timeline tổng kết</div>
+      ${['Parse HTML+CSS','Style Calc','Layout','Paint','Composite'].map((s,i)=>{
+        const colors=['#4ade80','#a78bfa','#fb923c','#38bdf8','#f472b6'];
+        const widths=[20,15,30,20,15];
+        return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+          <div style="width:90px;font-size:9px;color:${colors[i]}">${s}</div>
+          <div style="flex:1;height:8px;background:var(--bg3);border-radius:3px;overflow:hidden">
+            <div style="width:${widths[i]}%;height:100%;background:${colors[i]};border-radius:3px;opacity:.7"></div>
+          </div>
+        </div>`;
+      }).join('')}
+      <div style="margin-top:6px;font-size:10px;color:var(--text3)">Total ~16ms target (60fps)</div>
+    </div>
+  </div>`;
+}
+
+function renderDirty(){
+  return `
+  <div class="card anim-in">
+    <div class="card-label">Dirty flag — thay đổi được ghi nhận</div>
+    <div style="font-size:10px;color:var(--text2);margin-bottom:10px;line-height:1.7">
+      JavaScript thay đổi style → trình duyệt đánh dấu "dirty", KHÔNG render ngay lập tức.<br>
+      Render được batch lại và chạy trước frame tiếp theo (requestAnimationFrame timing).
+    </div>
+    <div class="dirty-wrap">
+      <div class="dirty-node dirty">p.desc — background dirty</div>
+      <div class="dirty-node">h1.title — clean</div>
+      <div class="dirty-node">#cta — clean</div>
+      <div class="dirty-node">body — clean</div>
+    </div>
+    <div style="margin-top:12px;font-size:10px;font-family:var(--mono);background:var(--bg3);padding:8px;border-radius:6px;color:var(--text2)">
+      element.style.backgroundColor = <span style="color:#86efac">"#ff0000"</span>;<br>
+      <span style="color:var(--text3)">// → đánh dấu dirty, KHÔNG render ngay</span><br>
+      <span style="color:var(--text3)">// → Layout: SKIP (kích thước không đổi)</span><br>
+      <span style="color:var(--text3)">// → Paint: chỉ repaint node này</span>
+    </div>
+    <div style="margin-top:8px;padding:6px 8px;background:rgba(74,222,128,.08);border-radius:5px;font-size:10px;color:#4ade80">
+      ✓ Pipeline: Style → Paint → Composite (Layout SKIP)
+    </div>
+  </div>`;
+}
+
+function renderDirtyFull(){
+  return `
+  <div class="card anim-in">
+    <div class="card-label">Dirty flag — kích thước thay đổi</div>
+    <div style="font-size:10px;color:var(--text2);margin-bottom:10px;line-height:1.7">
+      Thay đổi width/height/margin/padding → ảnh hưởng đến vị trí các element khác → buộc phải chạy lại Layout (Reflow).
+    </div>
+    <div class="dirty-wrap">
+      <div class="dirty-node dirty">h1.title — width dirty</div>
+      <div class="dirty-node dirty">p.desc — position dirty</div>
+      <div class="dirty-node dirty">#cta — position dirty</div>
+      <div class="dirty-node dirty">body — height dirty</div>
+    </div>
+    <div style="margin-top:12px;font-size:10px;font-family:var(--mono);background:var(--bg3);padding:8px;border-radius:6px;color:var(--text2)">
+      element.style.width = <span style="color:#fb923c">"500px"</span>;<br>
+      <span style="color:var(--text3)">// → dirty toàn bộ layout</span><br>
+      <span style="color:var(--text3)">// → Tất cả element xung quanh tính lại</span>
+    </div>
+    <div style="margin-top:8px;padding:6px 8px;background:rgba(251,146,60,.08);border-radius:5px;font-size:10px;color:#fb923c">
+      ⚠ Pipeline đầy đủ: Style → Layout → Paint → Composite
+    </div>
+  </div>`;
+}
+
+function renderDirtyGPU(){
+  return `
+  <div class="card anim-in">
+    <div class="card-label">GPU layer — không cần CPU</div>
+    <div style="font-size:10px;color:var(--text2);margin-bottom:10px;line-height:1.7">
+      transform và opacity được promoted lên GPU composite layer.<br>
+      Thay đổi chúng: GPU tự xử lý, CPU (V8 + layout engine) không cần làm gì.
+    </div>
+    <div class="dirty-wrap">
+      <div class="dirty-node" style="border-color:#f472b6;color:#f472b6;background:rgba(244,114,182,.1)">.animated — GPU layer update</div>
+      <div class="dirty-node">h1.title — untouched</div>
+      <div class="dirty-node">p.desc — untouched</div>
+      <div class="dirty-node">Layout — NOT recalculated</div>
+    </div>
+    <div style="margin-top:12px;font-size:10px;font-family:var(--mono);background:var(--bg3);padding:8px;border-radius:6px;color:var(--text2)">
+      element.style.transform = <span style="color:#f472b6">"translateX(100px)"</span>;<br>
+      <span style="color:var(--text3)">// → GPU layer move only</span><br>
+      <span style="color:var(--text3)">// → NO style recalc</span><br>
+      <span style="color:var(--text3)">// → NO layout</span><br>
+      <span style="color:var(--text3)">// → NO paint</span>
+    </div>
+    <div style="margin-top:8px;padding:6px 8px;background:rgba(244,114,182,.08);border-radius:5px;font-size:10px;color:#f472b6">
+      ✓ Pipeline: Composite ONLY — cực nhanh ~0.1ms
+    </div>
+  </div>`;
+}
+
+function renderDirtyDisplay(){
+  return `
+  <div class="card anim-in">
+    <div class="card-label">display:none — xóa khỏi Render Tree</div>
+    <div style="font-size:10px;color:var(--text2);margin-bottom:10px;line-height:1.7">
+      <strong style="color:#fb923c">display:none</strong> xóa element ra khỏi document flow hoàn toàn.<br>
+      Khác với <strong style="color:#38bdf8">visibility:hidden</strong> (vẫn chiếm không gian, chỉ invisible).
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+      <div style="padding:8px;background:rgba(251,146,60,.08);border:1px solid rgba(251,146,60,.2);border-radius:6px;font-size:10px;color:#fb923c">
+        <div style="font-weight:700;margin-bottom:4px">display:none</div>
+        ✗ Không còn trong Render Tree<br>
+        ✗ Không chiếm space<br>
+        ✗ Full reflow required<br>
+        ✗ Không thể animate trực tiếp
+      </div>
+      <div style="padding:8px;background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.2);border-radius:6px;font-size:10px;color:#38bdf8">
+        <div style="font-weight:700;margin-bottom:4px">visibility:hidden</div>
+        ✓ Vẫn trong Render Tree<br>
+        ✓ Vẫn chiếm space<br>
+        ✓ Chỉ Paint lại (skip Layout)<br>
+        ✓ Có thể transition
+      </div>
+    </div>
+    <div style="margin-top:8px;padding:6px 8px;background:rgba(251,146,60,.08);border-radius:5px;font-size:10px;color:#fb923c">
+      ⚠ Pipeline đầy đủ + Heavy reflow: Style → Layout → Paint → Composite
+    </div>
+  </div>`;
+}
+
+function renderStyleOnly(){
+  return `
+  <div class="card anim-in">
+    <div class="card-label">Style recalculation — chỉ node dirty</div>
+    <div style="font-size:10px;color:var(--text2);margin-bottom:8px;line-height:1.7">
+      Trình duyệt chỉ recalculate style cho node bị dirty và các descendants của nó (nếu có inheritance ảnh hưởng).
+    </div>
+    <div class="rule highlight">
+      <div class="rule-sel">p.desc — recalculating</div>
+      <div class="rule-prop">background-color: <span>#ff0000</span> ← changed</div>
+      <div class="rule-prop">color: <span>#666</span> ← unchanged</div>
+    </div>
+    <div class="rule" style="opacity:.4">
+      <div class="rule-sel">h1.title — skipped (clean)</div>
+    </div>
+    <div class="rule" style="opacity:.4">
+      <div class="rule-sel">#cta — skipped (clean)</div>
+    </div>
+  </div>`;
+}
+
+function renderLayoutFull(){
+  return `
+  <div class="card anim-in">
+    <div class="card-label">Reflow — tính lại layout</div>
+    <div style="font-size:10px;color:var(--text2);margin-bottom:8px;line-height:1.7">
+      h1 width thay đổi → các element sau phải tính lại vị trí → layout lan xuống cây.
+    </div>
+    <div style="font-size:10px;font-family:var(--mono);background:var(--bg3);padding:8px;border-radius:6px;color:var(--text2);margin-bottom:8px">
+      h1: x:16 y:16 <span style="color:#fb923c">w:500</span> h:38  ← changed<br>
+      p:  x:16 <span style="color:#fb923c">y:62</span> w:1408 h:48 ← recalc<br>
+      btn: x:16 <span style="color:#fb923c">y:118</span> w:96 h:32 ← recalc
+    </div>
+    <div style="padding:6px 8px;background:rgba(251,146,60,.08);border-radius:5px;font-size:10px;color:#fb923c">
+      ⚠ Forced reflow: element.offsetWidth lu sau thay đổi style → trình duyệt phải tính ngay, không batch được!
+    </div>
+  </div>`;
+}
+
+function renderPaintOnly(){
+  return `
+  <div class="card anim-in">
+    <div class="card-label">Repaint — chỉ vùng bị ảnh hưởng</div>
+    <div style="font-size:10px;color:var(--text2);margin-bottom:8px;line-height:1.7">
+      Trình duyệt dùng "invalidation region" — chỉ repaint phần thay đổi.
+    </div>
+    <div class="layer-stack">
+      <div class="paint-layer visible" style="border-color:rgba(56,189,248,.3)">
+        <div class="layer-dot" style="background:#38bdf8"></div>
+        <div class="layer-preview" style="background:rgba(56,189,248,.2);border-color:rgba(56,189,248,.3)"></div>
+        <span style="color:#38bdf8">Invalidation region — repainted</span>
+      </div>
+      <div class="paint-layer visible" style="opacity:.4">
+        <div class="layer-dot" style="background:var(--text3)"></div>
+        <div class="layer-preview"></div>
+        <span>Vùng khác — skipped (unchanged)</span>
+      </div>
+    </div>
+    <div style="margin-top:8px;padding:6px 8px;background:rgba(56,189,248,.08);border-radius:5px;font-size:10px;color:#38bdf8">
+      ✓ Partial repaint — hiệu quả hơn full repaint
+    </div>
+  </div>`;
+}
+
+function renderGPUOnly(){
+  return `
+  <div class="card anim-in">
+    <div class="card-label">Composite only — GPU tự xử lý</div>
+    <div class="composite-wrap">
+      <div class="comp-layer visible" style="left:0;top:0;width:100%;height:36px;background:rgba(30,30,40,.9);border-color:rgba(74,222,128,.3);color:#4ade80;font-size:9px">Base layer — untouched</div>
+      <div class="comp-layer visible" style="left:4px;top:40px;width:70%;height:36px;background:rgba(244,114,182,.25);border-color:rgba(244,114,182,.6);color:#f472b6;font-size:9px;box-shadow:0 0 10px rgba(244,114,182,.2)">GPU layer → translateX(100px) ← moving!</div>
+      <div class="comp-layer visible" style="right:4px;top:40px;width:25%;height:36px;background:rgba(251,191,36,.1);border-color:rgba(251,191,36,.3);color:#fbbf24;font-size:9px">Fixed layer — untouched</div>
+    </div>
+    <div style="margin-top:8px;padding:6px 8px;background:rgba(244,114,182,.08);border-radius:5px;font-size:10px;color:#f472b6">
+      ✓ CPU không làm gì — GPU dịch chuyển layer. Lý do animation mượt 60fps!
+    </div>
+  </div>`;
+}
+
+function renderStyleDisplay(){
+  return `
+  <div class="card anim-in">
+    <div class="card-label">Render Tree — node bị xóa</div>
+    <div class="tree">
+      <div class="tree-node tag">&lt;body&gt;</div>
+      <div class="tree-node tag indent1">&lt;h1&gt; — in Render Tree</div>
+      <div class="tree-node indent2" style="color:var(--text3);text-decoration:line-through">&lt;p&gt; — REMOVED (display:none)</div>
+      <div class="tree-node tag indent1">&lt;button&gt; — in Render Tree</div>
+    </div>
+    <div style="margin-top:8px;font-size:10px;color:var(--text2);line-height:1.7">
+      Node với display:none không có trong Render Tree → không được paint → nhưng space bị giải phóng → reflow required.
+    </div>
+  </div>`;
+}
+
+function renderLayoutDisplay(){
+  return `
+  <div class="card anim-in">
+    <div class="card-label">Heavy Reflow — element bị xóa khỏi flow</div>
+    <div style="font-size:10px;font-family:var(--mono);background:var(--bg3);padding:8px;border-radius:6px;color:var(--text2);margin-bottom:8px">
+      h1:  x:16 y:16 w:1408 h:38  ← unchanged<br>
+      p:   <span style="color:#fb923c;text-decoration:line-through">x:16 y:62 w:1408 h:48</span> ← REMOVED<br>
+      btn: x:16 <span style="color:#fb923c">y:62</span> w:96 h:32  ← moved up!
+    </div>
+    <div style="padding:6px 8px;background:rgba(251,146,60,.08);border-radius:5px;font-size:10px;color:#fb923c;margin-bottom:6px">
+      ⚠ Tất cả element sau node bị xóa phải tính lại vị trí
+    </div>
+    <div style="padding:6px 8px;background:rgba(56,189,248,.08);border-radius:5px;font-size:10px;color:#38bdf8">
+      💡 Dùng visibility:hidden hoặc opacity:0 + pointer-events:none nếu muốn ẩn mà không trigger reflow
+    </div>
+  </div>`;
+}
+
+/* ════════════════════════════════════
+   CONTROLS
+════════════════════════════════════ */
+function setScenario(id){
+  currentScenario = id;
+  currentStep = -1;
+  document.querySelectorAll('.trigger-btn').forEach(b => {
+    b.classList.remove('on');
+    b.style.background = '';
+    b.style.color = '';
+    b.style.borderColor = '';
+  });
+  const btn = document.getElementById('trg-' + id);
+  const colors = {initial:'#a78bfa',color:'#38bdf8',width:'#fb923c',transform:'#f472b6',display:'#fbbf24'};
+  const c = colors[id] || '#a78bfa';
+  btn.classList.add('on');
+  btn.style.background = `rgba(${hexToRgb(c)},.2)`;
+  btn.style.color = c;
+  btn.style.borderColor = c;
+  updatePipelineBar();
+  renderExplain(-1);
+  document.getElementById('step-content').innerHTML = '';
+  document.getElementById('step-counter').textContent = `Bước 0 / ${getSteps().length}`;
+}
+
+function hexToRgb(hex){
+  const r=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return r ? `${parseInt(r[1],16)},${parseInt(r[2],16)},${parseInt(r[3],16)}` : '255,255,255';
+}
+
+function next(){
+  const steps = getSteps();
+  if(currentStep < steps.length - 1){
+    currentStep++;
+    updateUI();
+  }
+}
+function prev(){
+  if(currentStep > 0){
+    currentStep--;
+    updateUI();
+  } else if(currentStep === 0){
+    currentStep = -1;
+    resetUI();
+  }
+}
+function jumpTo(seg){
+  const steps = getSteps();
+  const idx = steps.findIndex(s => s.seg === seg);
+  if(idx >= 0){ currentStep = idx; updateUI(); }
+}
+function resetSim(){
+  currentStep = -1;
+  resetUI();
+}
+
+function resetUI(){
+  updatePipelineBar();
+  renderExplain(-1);
+  document.getElementById('step-content').innerHTML = '';
+  document.getElementById('step-counter').textContent = `Bước 0 / ${getSteps().length}`;
+}
+
+function updateUI(){
+  const steps = getSteps();
+  const s = steps[currentStep];
+  updatePipelineBar();
+  renderExplain(currentStep);
+  document.getElementById('step-content').innerHTML = s.render();
+  document.getElementById('step-counter').textContent = `Bước ${currentStep+1} / ${steps.length}`;
+  animateLayers();
+}
+
+function updatePipelineBar(){
+  const steps = getSteps();
+  const segs = document.querySelectorAll('.pipe-seg');
+  segs.forEach((seg, i) => {
+    seg.classList.remove('active','done');
+    if(currentStep < 0) return;
+    const activeSegs = steps.slice(0, currentStep+1).map(s=>s.seg).filter(s=>s>=0);
+    if(i === steps[currentStep]?.seg) seg.classList.add('active');
+    else if(activeSegs.includes(i) && i !== steps[currentStep]?.seg) seg.classList.add('done');
+  });
+}
+
+function renderExplain(stepIdx){
+  const steps = getSteps();
+  const phaseEl = document.getElementById('explain-phase');
+  const textEl = document.getElementById('explain-text');
+  if(stepIdx < 0){
+    phaseEl.textContent = scenarios[currentScenario].label;
+    phaseEl.style.color = 'var(--text2)';
+    textEl.textContent = `${steps.length} bước. Bấm "Tiếp →" để bắt đầu.`;
+    return;
+  }
+  const s = steps[stepIdx];
+  phaseEl.textContent = s.phase;
+  phaseEl.style.color = s.color;
+  textEl.textContent = s.explain;
+}
+
+function animateLayers(){
+  const layers = document.querySelectorAll('.paint-layer');
+  if(!layers.length) return;
+  layers.forEach((l,i) => {
+    setTimeout(()=>{ l.classList.add('visible'); }, i*120);
+  });
+}
+
+// Init
+setScenario('initial');
+</script>
+</body>
+</html>
