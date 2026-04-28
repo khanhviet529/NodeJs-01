@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Node.js Event Loop Simulator</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #ffffff; --bg2: #f5f5f0; --border: rgba(0,0,0,0.12);
+    --text: #1a1a18; --text2: #6b6b65; --text3: #9a9a94;
+    --font: system-ui, sans-serif; --mono: 'Menlo','Consolas',monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1c1c1a; --bg2:#252523; --border:rgba(255,255,255,0.1); --text:#e8e6de; --text2:#9a9892; --text3:#6a6864; }
+    .nt  { background:#085041 !important; color:#9FE1CB !important; }
+    .pr  { background:#085041 !important; color:#9FE1CB !important; }
+    .tm  { background:#633806 !important; color:#FAC775 !important; }
+    .fs  { background:#712B13 !important; color:#F5C4B3 !important; }
+    .im  { background:#3C3489 !important; color:#CECBF6 !important; }
+    .cs  { background:#0C447C !important; color:#B5D4F4 !important; }
+  }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); padding: 16px; font-size: 13px; }
+  h1 { font-size: 16px; font-weight: 500; margin-bottom: 4px; }
+  .subtitle { font-size: 12px; color: var(--text2); margin-bottom: 14px; }
+
+  .phase-badge {
+    display: inline-block; padding: 3px 10px; border-radius: 12px;
+    font-size: 11px; font-weight: 500; margin-bottom: 8px;
+  }
+  .explain {
+    font-size: 12px; color: var(--text2); line-height: 1.65;
+    padding: 8px 10px; background: var(--bg2); border-radius: 6px;
+    border-left: 3px solid var(--border); margin-bottom: 12px;
+    white-space: pre-line;
+  }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+  .col {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px; min-height: 90px; background: var(--bg);
+  }
+  .col-title {
+    font-size: 10px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--text3); margin-bottom: 6px;
+  }
+  .col-title.green { color: #0F6E56; }
+  .empty { font-size: 11px; color: var(--text3); }
+
+  .queue-item {
+    padding: 3px 7px; border-radius: 5px; margin-bottom: 3px;
+    font-size: 11px; font-family: var(--mono); line-height: 1.4;
+  }
+  .nt  { background: #E1F5EE; color: #085041; }
+  .pr  { background: #E1F5EE; color: #085041; }
+  .tm  { background: #FAEEDA; color: #633806; }
+  .fs  { background: #FAECE7; color: #712B13; }
+  .im  { background: #EEEDFE; color: #3C3489; }
+  .cs  { background: #E6F1FB; color: #0C447C; }
+
+  .output-col { border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin-bottom: 10px; }
+  .output-line { padding: 2px 4px; font-family: var(--mono); font-size: 12px; border-bottom: 1px solid var(--border); color: var(--text2); }
+  .output-line.new { color: #1D9E75; font-weight: 600; }
+
+  .nav { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .btn {
+    padding: 6px 16px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--bg2); color: var(--text); cursor: pointer; font-size: 12px;
+  }
+  .btn:hover { background: var(--bg); }
+  .btn.primary { background: #1D9E75; color: #fff; border-color: transparent; }
+  .btn.primary:hover { background: #0F6E56; }
+  .step-info { font-size: 12px; color: var(--text3); margin-left: auto; }
+
+  .progress { height: 3px; background: var(--border); border-radius: 2px; margin-bottom: 14px; }
+  .progress-bar { height: 100%; background: #1D9E75; border-radius: 2px; transition: width .3s; }
+
+  .legend { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .legend-item { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text2); }
+  .legend-dot { width: 10px; height: 10px; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<h1>Node.js Event Loop — Mô phỏng từng bước</h1>
+<p class="subtitle">Theo dõi luồng thực thi của đoạn code Node.js với setTimeout, fs.readFile, setImmediate, nextTick, Promise</p>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot nt"></div> nextTick / Promise</div>
+  <div class="legend-item"><div class="legend-dot tm"></div> Timers phase</div>
+  <div class="legend-item"><div class="legend-dot fs"></div> Poll (I/O) phase</div>
+  <div class="legend-item"><div class="legend-dot im"></div> Check phase</div>
+  <div class="legend-item"><div class="legend-dot cs"></div> Call Stack</div>
+</div>
+
+<div class="progress"><div class="progress-bar" id="progress-bar"></div></div>
+
+<span class="phase-badge" id="phase-badge"></span>
+<div class="explain" id="explain"></div>
+
+<div class="grid">
+  <div class="col">
+    <div class="col-title">Call Stack</div>
+    <div id="cs"></div>
+  </div>
+  <div class="col">
+    <div class="col-title green">nextTick Queue</div>
+    <div id="nt"></div>
+  </div>
+  <div class="col">
+    <div class="col-title green">Microtask Queue</div>
+    <div id="mt"></div>
+  </div>
+  <div class="col">
+    <div class="col-title">Macrotask / Phases</div>
+    <div id="macro"></div>
+  </div>
+</div>
+
+<div class="output-col">
+  <div class="col-title">Output</div>
+  <div id="output"></div>
+</div>
+
+<div class="nav">
+  <button class="btn" onclick="prev()">← Trước</button>
+  <button class="btn primary" onclick="next()">Tiếp →</button>
+  <button class="btn" onclick="reset()">↺ Reset</button>
+  <span class="step-info" id="step-info"></span>
+</div>
+
+<script>
+const steps = [
+  {
+    phase:"Khởi động", phaseColor:"#E1F5EE", phaseText:"#085041",
+    cs:["main()"],
+    nt:[], mt:[], macro:[],
+    output:[], newOutput:[],
+    explain:"Chương trình bắt đầu. main() được đẩy vào Call Stack. Node.js bắt đầu đọc và thực thi code từ trên xuống dưới."
+  },
+  {
+    phase:"Sync — console.log('1. start')", phaseColor:"#E1F5EE", phaseText:"#085041",
+    cs:["main()", "console.log('1. start')"],
+    nt:[], mt:[], macro:[],
+    output:["1. start"], newOutput:["1. start"],
+    explain:"console.log là đồng bộ → push vào stack, chạy ngay, in '1. start', pop ra."
+  },
+  {
+    phase:"Sync — setTimeout(cb, 0)", phaseColor:"#FAEEDA", phaseText:"#633806",
+    cs:["main()"],
+    nt:[], mt:[],
+    macro:["[Timers] setTimeout cb"],
+    output:["1. start"], newOutput:[],
+    explain:"setTimeout(cb, 0) gặp → ủy thác cho libuv. Callback vào Timers phase queue.\nDelay=0 nhưng KHÔNG chạy ngay — phải chờ Call Stack trống và Event Loop đến Timers phase."
+  },
+  {
+    phase:"Sync — fs.readFile()", phaseColor:"#FAECE7", phaseText:"#712B13",
+    cs:["main()"],
+    nt:[], mt:[],
+    macro:["[Timers] setTimeout cb", "[Poll] fs.readFile cb (đang đọc file...)"],
+    output:["1. start"], newOutput:[],
+    explain:"fs.readFile() → libuv thread pool nhận lệnh đọc file ở background.\nCallback sẽ vào Poll phase KHI file đọc xong. Main thread tiếp tục chạy, không bị block."
+  },
+  {
+    phase:"Sync — setImmediate()", phaseColor:"#EEEDFE", phaseText:"#3C3489",
+    cs:["main()"],
+    nt:[], mt:[],
+    macro:["[Timers] setTimeout cb", "[Poll] fs.readFile cb (đang đọc file...)", "[Check] setImmediate cb"],
+    output:["1. start"], newOutput:[],
+    explain:"setImmediate(cb) → callback vào Check phase queue.\nCheck phase chạy SAU Poll phase trong mỗi vòng Event Loop."
+  },
+  {
+    phase:"Sync — process.nextTick()", phaseColor:"#E1F5EE", phaseText:"#085041",
+    cs:["main()"],
+    nt:["nextTick: log('3. top nextTick')"],
+    mt:[],
+    macro:["[Timers] setTimeout cb", "[Poll] fs.readFile cb (đang đọc file...)", "[Check] setImmediate cb"],
+    output:["1. start"], newOutput:[],
+    explain:"process.nextTick(cb) → callback vào nextTick Queue.\nĐây là queue ưu tiên CAO NHẤT trong Node.js — chạy trước cả Promise, trước khi Event Loop chuyển phase."
+  },
+  {
+    phase:"Sync — Promise.resolve().then()", phaseColor:"#E1F5EE", phaseText:"#085041",
+    cs:["main()"],
+    nt:["nextTick: log('3. top nextTick')"],
+    mt:["Promise.then: log('4. top promise')"],
+    macro:["[Timers] setTimeout cb", "[Poll] fs.readFile cb (đang đọc file...)", "[Check] setImmediate cb"],
+    output:["1. start"], newOutput:[],
+    explain:"Promise.resolve().then(cb) → callback vào Microtask Queue.\nƯu tiên cao, chạy sau nextTick nhưng trước khi Event Loop chuyển phase."
+  },
+  {
+    phase:"Sync — console.log('2. end')", phaseColor:"#E1F5EE", phaseText:"#085041",
+    cs:["main()", "console.log('2. end')"],
+    nt:["nextTick: log('3. top nextTick')"],
+    mt:["Promise.then: log('4. top promise')"],
+    macro:["[Timers] setTimeout cb", "[Poll] fs.readFile cb (đang đọc file...)", "[Check] setImmediate cb"],
+    output:["1. start", "2. end"], newOutput:["2. end"],
+    explain:"console.log('2. end') đồng bộ → chạy ngay, in '2. end'.\nTất cả sync code đã chạy xong. main() sắp được pop ra."
+  },
+  {
+    phase:"Call Stack trống → drain nextTick Queue", phaseColor:"#E1F5EE", phaseText:"#085041",
+    cs:["nextTick cb → log('3. top nextTick')"],
+    nt:[], mt:["Promise.then: log('4. top promise')"],
+    macro:["[Timers] setTimeout cb", "[Poll] fs.readFile cb (đang đọc file...)", "[Check] setImmediate cb"],
+    output:["1. start", "2. end", "3. top nextTick"], newOutput:["3. top nextTick"],
+    explain:"main() pop ra → Call Stack trống!\n\nNode.js kiểm tra nextTick Queue TRƯỚC TIÊN (ưu tiên cao nhất).\n→ Chạy hết nextTick queue: in '3. top nextTick'."
+  },
+  {
+    phase:"drain Microtask Queue (Promise)", phaseColor:"#E1F5EE", phaseText:"#085041",
+    cs:["Promise.then cb → log('4. top promise')"],
+    nt:[], mt:[],
+    macro:["[Timers] setTimeout cb", "[Poll] fs.readFile cb (đang đọc file...)", "[Check] setImmediate cb"],
+    output:["1. start", "2. end", "3. top nextTick", "4. top promise"], newOutput:["4. top promise"],
+    explain:"nextTick Queue rỗng → kiểm tra Microtask Queue (Promise).\n→ Chạy hết: in '4. top promise'.\n\nBây giờ mới bắt đầu vòng Event Loop!"
+  },
+  {
+    phase:"Event Loop Phase ① — Timers", phaseColor:"#FAEEDA", phaseText:"#633806",
+    cs:["setTimeout cb", "console.log('5. timeout')"],
+    nt:[], mt:[],
+    macro:["[Poll] fs.readFile cb (đang đọc file...)", "[Check] setImmediate cb"],
+    output:["1. start", "2. end", "3. top nextTick", "4. top promise", "5. timeout"],
+    newOutput:["5. timeout"],
+    explain:"Event Loop vào Phase ① Timers.\nTimer delay=0 đã hết → setTimeout callback được đưa vào Call Stack.\n→ in '5. timeout'."
+  },
+  {
+    phase:"setTimeout cb đăng ký nextTick + Promise", phaseColor:"#FAEEDA", phaseText:"#633806",
+    cs:["setTimeout cb"],
+    nt:["nextTick: log('6. nextTick in timeout')"],
+    mt:["Promise.then: log('7. promise in timeout')"],
+    macro:["[Poll] fs.readFile cb (đang đọc file...)", "[Check] setImmediate cb"],
+    output:["1. start", "2. end", "3. top nextTick", "4. top promise", "5. timeout"],
+    newOutput:[],
+    explain:"Bên trong setTimeout callback:\n• process.nextTick(cb) → nextTick Queue\n• Promise.resolve().then(cb) → Microtask Queue\n\nChúng chưa chạy ngay — phải chờ callback này xong."
+  },
+  {
+    phase:"Sau Timers phase — drain nextTick + Microtask", phaseColor:"#E1F5EE", phaseText:"#085041",
+    cs:[],
+    nt:[], mt:[],
+    macro:["[Poll] fs.readFile cb (đang đọc file...)", "[Check] setImmediate cb"],
+    output:["1. start","2. end","3. top nextTick","4. top promise","5. timeout","6. nextTick in timeout","7. promise in timeout"],
+    newOutput:["6. nextTick in timeout","7. promise in timeout"],
+    explain:"SAU MỖI PHASE, Node.js drain hết nextTick → rồi Microtask trước khi chuyển phase tiếp.\n→ '6. nextTick in timeout'\n→ '7. promise in timeout'\n\nQuy tắc vàng: nextTick + Microtask luôn chạy giữa các phase!"
+  },
+  {
+    phase:"Phase ③ Poll — fs.readFile callback", phaseColor:"#FAECE7", phaseText:"#712B13",
+    cs:["fs.readFile cb", "console.log('8. fs readFile callback')"],
+    nt:[], mt:[],
+    macro:["[Check] setImmediate cb"],
+    output:["1. start","2. end","3. top nextTick","4. top promise","5. timeout","6. nextTick in timeout","7. promise in timeout","8. fs readFile callback"],
+    newOutput:["8. fs readFile callback"],
+    explain:"Phase ③ Poll: libuv đọc file xong → callback vào Poll queue.\n→ in '8. fs readFile callback'.\n\nLưu ý: setImmediate đã được đăng ký trước khi vào Poll phase → nó sẽ chạy ở Check phase ngay sau."
+  },
+  {
+    phase:"fs cb đăng ký nextTick + Promise", phaseColor:"#FAECE7", phaseText:"#712B13",
+    cs:["fs.readFile cb"],
+    nt:["nextTick: log('9. nextTick in fs')"],
+    mt:["Promise.then: log('10. promise in fs')"],
+    macro:["[Check] setImmediate cb"],
+    output:["1. start","2. end","3. top nextTick","4. top promise","5. timeout","6. nextTick in timeout","7. promise in timeout","8. fs readFile callback"],
+    newOutput:[],
+    explain:"Bên trong fs callback:\n• process.nextTick(cb) → nextTick Queue\n• Promise.resolve().then(cb) → Microtask Queue"
+  },
+  {
+    phase:"Sau Poll — drain nextTick + Microtask", phaseColor:"#E1F5EE", phaseText:"#085041",
+    cs:[],
+    nt:[], mt:[],
+    macro:["[Check] setImmediate cb"],
+    output:["1. start","2. end","3. top nextTick","4. top promise","5. timeout","6. nextTick in timeout","7. promise in timeout","8. fs readFile callback","9. nextTick in fs","10. promise in fs"],
+    newOutput:["9. nextTick in fs","10. promise in fs"],
+    explain:"Sau Poll phase: drain nextTick → '9. nextTick in fs'\nRồi drain Microtask → '10. promise in fs'\n\nMẫu này lặp lại sau mỗi phase: nextTick → Promise → phase tiếp theo."
+  },
+  {
+    phase:"Phase ④ Check — setImmediate", phaseColor:"#EEEDFE", phaseText:"#3C3489",
+    cs:["setImmediate cb", "console.log('11. setImmediate')"],
+    nt:[], mt:[],
+    macro:[],
+    output:["1. start","2. end","3. top nextTick","4. top promise","5. timeout","6. nextTick in timeout","7. promise in timeout","8. fs readFile callback","9. nextTick in fs","10. promise in fs","11. setImmediate"],
+    newOutput:["11. setImmediate"],
+    explain:"Phase ④ Check: setImmediate callback chạy.\n→ in '11. setImmediate'\n\nTất cả queue đã trống. Event Loop nghỉ, chờ task mới."
+  },
+  {
+    phase:"Hoàn thành!", phaseColor:"#EAF3DE", phaseText:"#3B6D11",
+    cs:[], nt:[], mt:[], macro:[],
+    output:["1. start","2. end","3. top nextTick","4. top promise","5. timeout","6. nextTick in timeout","7. promise in timeout","8. fs readFile callback","9. nextTick in fs","10. promise in fs","11. setImmediate"],
+    newOutput:[],
+    explain:"Thứ tự hoàn chỉnh:\n\n① Sync code      → 1. start, 2. end\n② nextTick       → 3. top nextTick\n③ Microtask      → 4. top promise\n④ Timers phase   → 5. timeout\n   + nextTick     → 6. nextTick in timeout\n   + Microtask    → 7. promise in timeout\n⑤ Poll phase     → 8. fs readFile callback\n   + nextTick     → 9. nextTick in fs\n   + Microtask    → 10. promise in fs\n⑥ Check phase    → 11. setImmediate"
+  }
+];
+
+let cur = 0;
+
+function itemClass(txt) {
+  if (!txt) return 'cs';
+  if (txt.includes('nextTick')) return 'nt';
+  if (txt.includes('Promise') || txt.includes('promise')) return 'pr';
+  if (txt.includes('Timers') || txt.includes('setTimeout') || txt.includes('timeout')) return 'tm';
+  if (txt.includes('fs') || txt.includes('Poll') || txt.includes('readFile')) return 'fs';
+  if (txt.includes('setImmediate') || txt.includes('Check')) return 'im';
+  return 'cs';
+}
+
+function renderEl(id, items, defaultCls) {
+  const el = document.getElementById(id);
+  if (!items || items.length === 0) {
+    el.innerHTML = '<span class="empty">(trống)</span>';
+    return;
+  }
+  el.innerHTML = items.map(i => `<div class="queue-item ${defaultCls || itemClass(i)}">${i}</div>`).join('');
+}
+
+function render() {
+  const s = steps[cur];
+  const pct = ((cur + 1) / steps.length * 100).toFixed(1);
+  document.getElementById('progress-bar').style.width = pct + '%';
+  document.getElementById('phase-badge').textContent = s.phase;
+  document.getElementById('phase-badge').style.background = s.phaseColor;
+  document.getElementById('phase-badge').style.color = s.phaseText;
+  document.getElementById('explain').textContent = s.explain;
+  document.getElementById('step-info').textContent = `Bước ${cur + 1} / ${steps.length}`;
+
+  // Call stack: hiển thị ngược (top of stack ở trên)
+  const csEl = document.getElementById('cs');
+  if (!s.cs || s.cs.length === 0) {
+    csEl.innerHTML = '<span class="empty">(trống)</span>';
+  } else {
+    csEl.innerHTML = [...s.cs].reverse().map(i => `<div class="queue-item ${itemClass(i)}">${i}</div>`).join('');
+  }
+
+  renderEl('nt', s.nt);
+  renderEl('mt', s.mt);
+  renderEl('macro', s.macro);
+
+  const outEl = document.getElementById('output');
+  if (!s.output || s.output.length === 0) {
+    outEl.innerHTML = '<span class="empty">(chưa có output)</span>';
+  } else {
+    outEl.innerHTML = s.output.map(line => {
+      const isNew = s.newOutput && s.newOutput.includes(line);
+      return `<div class="output-line${isNew ? ' new' : ''}">${isNew ? '▶ ' : '   '}${line}</div>`;
+    }).join('');
+  }
+}
+
+function next() { if (cur < steps.length - 1) { cur++; render(); } }
+function prev() { if (cur > 0) { cur--; render(); } }
+function reset() { cur = 0; render(); }
+
+// Keyboard nav
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight') next();
+  if (e.key === 'ArrowLeft') prev();
+});
+
+render();
+</script>
+</body>
+</html>
