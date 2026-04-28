@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Node.js — Worker Threads & Thread Pool</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#ffffff;--bg2:#f6f5f0;--bg3:#eeedea;
+  --border:rgba(0,0,0,0.1);--border2:rgba(0,0,0,0.05);
+  --text:#1a1a18;--text2:#6b6b65;--text3:#9a9a94;
+  --font:system-ui,sans-serif;--mono:'Menlo','Consolas',monospace;
+  --r:8px;
+}
+@media(prefers-color-scheme:dark){
+  :root{--bg:#1c1c1a;--bg2:#252523;--bg3:#2e2e2b;
+    --border:rgba(255,255,255,0.1);--border2:rgba(255,255,255,0.05);
+    --text:#e8e6de;--text2:#9a9892;--text3:#6a6864}
+}
+body{font-family:var(--font);background:var(--bg);color:var(--text);padding:16px;font-size:13px;line-height:1.6;max-width:960px;margin:0 auto}
+
+/* ── Typography ── */
+h1{font-size:17px;font-weight:500;margin-bottom:3px}
+h2{font-size:14px;font-weight:500;margin:18px 0 8px}
+.sub{font-size:12px;color:var(--text2);margin-bottom:16px}
+.section-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin-bottom:8px}
+
+/* ── Tab nav ── */
+.tabs{display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap}
+.tab{padding:6px 14px;border-radius:20px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;font-size:12px;transition:all .15s}
+.tab:hover{background:var(--bg3)}
+.tab.on{color:#fff;border-color:transparent}
+.tab-panel{display:none}
+.tab-panel.on{display:block}
+
+/* ── Cards ── */
+.card{border:1px solid var(--border);border-radius:var(--r);padding:14px;background:var(--bg);margin-bottom:10px}
+.card-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);margin-bottom:10px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px}
+@media(max-width:620px){.grid2,.grid3{grid-template-columns:1fr}}
+
+/* ── Prose ── */
+.desc{font-size:12px;color:var(--text2);line-height:1.75;margin-bottom:10px}
+.points{list-style:none;margin-bottom:10px}
+.points li{font-size:12px;color:var(--text2);padding:4px 0;border-bottom:1px solid var(--border2);display:flex;gap:8px;align-items:flex-start}
+.points li:last-child{border-bottom:none}
+.dot{width:6px;height:6px;border-radius:50%;margin-top:6px;flex-shrink:0}
+
+/* ── Code ── */
+.code{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-family:var(--mono);font-size:11px;color:var(--text);line-height:1.75;overflow-x:auto;white-space:pre;margin-bottom:10px}
+.ck{color:#7F77DD}.cf{color:#1D9E75}.cs{color:#D85A30}.cn{color:#BA7517}.cc{color:var(--text3)}
+
+/* ── Tags / badges ── */
+.tag{display:inline-block;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:500;margin:1px}
+.badge{display:inline-block;padding:3px 9px;border-radius:5px;font-size:11px;font-family:var(--mono)}
+
+/* ── Architecture diagram (SVG-like using divs) ── */
+.arch{border:1px solid var(--border);border-radius:var(--r);padding:14px;background:var(--bg);margin-bottom:10px;overflow-x:auto}
+.arch-row{display:flex;align-items:stretch;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+.arch-box{border-radius:6px;padding:8px 12px;font-size:12px;font-weight:500;text-align:center;flex:1;min-width:80px;border:1px solid transparent}
+.arch-box.sm{font-size:11px;padding:6px 8px}
+.arch-arrow{display:flex;align-items:center;justify-content:center;color:var(--text3);font-size:13px;padding:0 2px;flex-shrink:0}
+.arch-sep{border-top:1px dashed var(--border);margin:6px 0;font-size:10px;color:var(--text3);padding-top:4px}
+.arch-label{font-size:10px;color:var(--text3);margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+
+/* ── Thread pool visual ── */
+.pool-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px}
+.thread-box{border-radius:6px;padding:8px 6px;text-align:center;border:1px solid transparent;transition:all .3s;cursor:default}
+.thread-box .t-num{font-size:10px;color:var(--text3);margin-bottom:3px}
+.thread-box .t-task{font-size:11px;font-weight:500;min-height:28px;display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.3}
+
+/* ── Comparison table ── */
+.tbl{width:100%;border-collapse:collapse;font-size:12px}
+.tbl th{text-align:left;padding:7px 10px;border-bottom:2px solid var(--border);color:var(--text2);font-weight:500;font-size:11px;text-transform:uppercase}
+.tbl td{padding:7px 10px;border-bottom:1px solid var(--border2);color:var(--text);vertical-align:top}
+.tbl tr:hover td{background:var(--bg2)}
+
+/* ── Sim controls ── */
+.sim-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.btn{padding:5px 14px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);cursor:pointer;font-size:12px}
+.btn:hover{background:var(--bg3)}
+.btn.primary{background:#1D9E75;color:#fff;border-color:transparent}
+.btn.primary:hover{background:#0F6E56}
+
+/* ── Timeline ── */
+.timeline{position:relative;padding-left:24px;margin-bottom:10px}
+.tl-item{position:relative;padding:6px 0 6px 16px;border-left:2px solid var(--border);margin-left:0}
+.tl-item:last-child{border-left-color:transparent}
+.tl-dot{position:absolute;left:-5px;top:10px;width:8px;height:8px;border-radius:50%;border:2px solid var(--bg)}
+.tl-title{font-size:12px;font-weight:500;margin-bottom:2px}
+.tl-desc{font-size:11px;color:var(--text2)}
+
+/* ── Callout ── */
+.callout{border-radius:6px;padding:10px 12px;font-size:12px;line-height:1.7;margin-bottom:10px;border-left:3px solid transparent}
+</style>
+</head>
+<body>
+
+<h1>Node.js — Thread Pool & Worker Threads</h1>
+<p class="sub">Phân tích cách Node.js xử lý tác vụ blocking với libuv Thread Pool và worker_threads module</p>
+
+<div class="tabs" id="tabs">
+  <button class="tab on" onclick="switchTab('overview')" style="background:#1D9E75">Tổng quan</button>
+  <button class="tab" onclick="switchTab('threadpool')">libuv Thread Pool</button>
+  <button class="tab" onclick="switchTab('worker')">Worker Threads</button>
+  <button class="tab" onclick="switchTab('compare')">So sánh & Khi nào dùng</button>
+  <button class="tab" onclick="switchTab('v8')">V8 & Call Stack</button>
+  <button class="tab" onclick="switchTab('demo')">Mô phỏng</button>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     TAB 1: OVERVIEW
+═══════════════════════════════════════════════ -->
+<div class="tab-panel on" id="tab-overview">
+
+  <div class="callout" style="background:#E1F5EE;border-color:#1D9E75;color:#085041">
+    <strong>Vấn đề cốt lõi:</strong> JavaScript single-threaded — nếu có tác vụ nặng (đọc file lớn, mã hóa, tính toán...) chạy trên Main Thread, toàn bộ server bị block. Node.js giải quyết bằng 2 cơ chế: <strong>libuv Thread Pool</strong> (tự động, cho I/O) và <strong>Worker Threads</strong> (thủ công, cho CPU-bound).
+  </div>
+
+  <!-- Architecture -->
+  <div class="arch">
+    <div class="arch-label">Kiến trúc tổng thể Node.js</div>
+
+    <!-- Main thread -->
+    <div style="border:1px dashed var(--border);border-radius:8px;padding:10px;margin-bottom:8px">
+      <div class="arch-label" style="color:#185FA5">Main Thread (V8 + libuv Event Loop)</div>
+      <div class="arch-row">
+        <div class="arch-box" style="background:#E6F1FB;color:#0C447C;border-color:#85B7EB">V8 Engine<br><span style="font-size:10px;font-weight:400">JS execution</span></div>
+        <div class="arch-arrow">↔</div>
+        <div class="arch-box" style="background:#E6F1FB;color:#0C447C;border-color:#85B7EB">Call Stack<br><span style="font-size:10px;font-weight:400">sync code</span></div>
+        <div class="arch-arrow">↔</div>
+        <div class="arch-box" style="background:#E6F1FB;color:#0C447C;border-color:#85B7EB">Event Loop<br><span style="font-size:10px;font-weight:400">6 phases</span></div>
+        <div class="arch-arrow">↔</div>
+        <div class="arch-box" style="background:#E6F1FB;color:#0C447C;border-color:#85B7EB">Queues<br><span style="font-size:10px;font-weight:400">nextTick, Promise</span></div>
+      </div>
+    </div>
+
+    <!-- libuv -->
+    <div style="border:1px dashed var(--border);border-radius:8px;padding:10px;margin-bottom:8px">
+      <div class="arch-label" style="color:#3B6D11">libuv Layer</div>
+      <div class="arch-row">
+        <div class="arch-box" style="background:#EAF3DE;color:#27500A;border-color:#97C459;flex:2">
+          OS Async I/O (epoll / kqueue / IOCP)<br>
+          <span style="font-size:10px;font-weight:400">network, pipes → kernel xử lý, không cần thread riêng</span>
+        </div>
+        <div class="arch-arrow">|</div>
+        <div class="arch-box" style="background:#EAF3DE;color:#27500A;border-color:#97C459;flex:3">
+          Thread Pool (mặc định 4 threads)<br>
+          <span style="font-size:10px;font-weight:400">fs, crypto, dns.lookup, zlib — tác vụ không có OS async API</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Worker threads -->
+    <div style="border:1px dashed var(--border);border-radius:8px;padding:10px">
+      <div class="arch-label" style="color:#993556">Worker Threads (worker_threads module)</div>
+      <div class="arch-row">
+        <div class="arch-box sm" style="background:#FBEAF0;color:#72243E;border-color:#ED93B1">Worker #1<br><span style="font-size:10px;font-weight:400">V8 + Event Loop riêng</span></div>
+        <div class="arch-box sm" style="background:#FBEAF0;color:#72243E;border-color:#ED93B1">Worker #2<br><span style="font-size:10px;font-weight:400">V8 + Event Loop riêng</span></div>
+        <div class="arch-box sm" style="background:#FBEAF0;color:#72243E;border-color:#ED93B1">Worker #3<br><span style="font-size:10px;font-weight:400">V8 + Event Loop riêng</span></div>
+        <div class="arch-box sm" style="background:#FBEAF0;color:#72243E;border-color:#ED93B1">Worker #N<br><span style="font-size:10px;font-weight:400">do developer tạo</span></div>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:6px">↕ Giao tiếp qua MessageChannel (postMessage / on('message')) — không chia sẻ memory (trừ SharedArrayBuffer)</div>
+    </div>
+  </div>
+
+  <!-- Two problems -->
+  <div class="grid2">
+    <div class="card">
+      <div class="card-title" style="color:#3B6D11">I/O-bound tasks → Thread Pool</div>
+      <p class="desc">Tác vụ chủ yếu <em>chờ</em> hệ thống (đọc file, query DB, DNS). CPU nhàn rỗi trong thời gian chờ.</p>
+      <ul class="points">
+        <li><span class="dot" style="background:#639922"></span>fs.readFile, fs.writeFile</li>
+        <li><span class="dot" style="background:#639922"></span>crypto.pbkdf2, crypto.scrypt</li>
+        <li><span class="dot" style="background:#639922"></span>dns.lookup (không phải dns.resolve)</li>
+        <li><span class="dot" style="background:#639922"></span>zlib compress/decompress</li>
+        <li><span class="dot" style="background:#639922"></span>child_process.exec</li>
+      </ul>
+      <div class="callout" style="background:#EAF3DE;border-color:#639922;color:#27500A">Tự động — bạn chỉ cần gọi API, Node.js tự đẩy vào thread pool</div>
+    </div>
+    <div class="card">
+      <div class="card-title" style="color:#993556">CPU-bound tasks → Worker Threads</div>
+      <p class="desc">Tác vụ dùng <em>nhiều CPU</em> liên tục (tính toán, xử lý ảnh, parse JSON lớn). Sẽ block Main Thread nếu không tách ra.</p>
+      <ul class="points">
+        <li><span class="dot" style="background:#D4537E"></span>Xử lý ảnh / video encoding</li>
+        <li><span class="dot" style="background:#D4537E"></span>Machine learning inference</li>
+        <li><span class="dot" style="background:#D4537E"></span>Parse JSON/CSV file lớn</li>
+        <li><span class="dot" style="background:#D4537E"></span>Tính toán số học nặng</li>
+        <li><span class="dot" style="background:#D4537E"></span>Cryptography tùy chỉnh</li>
+      </ul>
+      <div class="callout" style="background:#FBEAF0;border-color:#D4537E;color:#72243E">Thủ công — bạn tự tạo Worker, gửi data, nhận kết quả qua message</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     TAB 2: THREAD POOL
+═══════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-threadpool">
+
+  <div class="callout" style="background:#EAF3DE;border-color:#639922;color:#27500A">
+    <strong>libuv Thread Pool</strong> là tập hợp các C-level threads chạy ngầm bên dưới Node.js. Mặc định 4 threads. Dùng để xử lý các tác vụ mà OS không cung cấp async API (không thể dùng epoll/kqueue).
+  </div>
+
+  <!-- Thread pool visual -->
+  <div class="card" id="pool-card">
+    <div class="card-title">Thread Pool — trạng thái (click để mô phỏng tác vụ)</div>
+    <div class="pool-grid" id="pool-grid"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+      <button class="btn primary" onclick="addTask('fs','fs.readFile')">+ fs.readFile</button>
+      <button class="btn primary" onclick="addTask('crypto','crypto.pbkdf2')" style="background:#BA7517;border-color:transparent">+ crypto.pbkdf2</button>
+      <button class="btn primary" onclick="addTask('zlib','zlib.gzip')" style="background:#7F77DD;border-color:transparent">+ zlib.gzip</button>
+      <button class="btn primary" onclick="addTask('dns','dns.lookup')" style="background:#D4537E;border-color:transparent">+ dns.lookup</button>
+      <button class="btn" onclick="resetPool()">Reset</button>
+    </div>
+    <div id="pool-queue-label" style="font-size:11px;color:var(--text3)">Queue chờ: <span id="pool-queue-count">0</span> tác vụ</div>
+  </div>
+
+  <!-- How it works -->
+  <div class="grid2">
+    <div class="card">
+      <div class="card-title">Luồng hoạt động</div>
+      <div class="timeline">
+        <div class="tl-item">
+          <div class="tl-dot" style="background:#639922"></div>
+          <div class="tl-title">① Main Thread gọi API</div>
+          <div class="tl-desc">fs.readFile(), crypto.pbkdf2()... Main Thread KHÔNG chờ</div>
+        </div>
+        <div class="tl-item">
+          <div class="tl-dot" style="background:#639922"></div>
+          <div class="tl-title">② libuv nhận lệnh</div>
+          <div class="tl-desc">Kiểm tra thread pool có thread rảnh không</div>
+        </div>
+        <div class="tl-item">
+          <div class="tl-dot" style="background:#639922"></div>
+          <div class="tl-title">③ Thread nhận tác vụ</div>
+          <div class="tl-desc">Thread pool thread thực thi blocking operation (đọc file, hash...)</div>
+        </div>
+        <div class="tl-item">
+          <div class="tl-dot" style="background:#639922"></div>
+          <div class="tl-title">④ Tác vụ hoàn thành</div>
+          <div class="tl-desc">Thread báo hiệu libuv, kết quả sẵn sàng</div>
+        </div>
+        <div class="tl-item" style="border-left-color:transparent">
+          <div class="tl-dot" style="background:#639922"></div>
+          <div class="tl-title">⑤ Callback vào Poll Queue</div>
+          <div class="tl-desc">Event Loop nhận callback ở Poll phase, đưa vào Call Stack</div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Cấu hình & Giới hạn</div>
+      <ul class="points">
+        <li><span class="dot" style="background:#639922"></span><strong>Mặc định 4 threads</strong> — dùng tốt cho máy 4 cores</li>
+        <li><span class="dot" style="background:#639922"></span>Tăng qua biến môi trường: <code style="font-family:var(--mono);font-size:11px">UV_THREADPOOL_SIZE=16</code></li>
+        <li><span class="dot" style="background:#639922"></span>Tối đa 1024 threads (khuyến nghị ≤ số CPU cores)</li>
+        <li><span class="dot" style="background:#639922"></span>Nếu 4 threads đều bận → tác vụ mới vào <strong>hàng đợi</strong>, không bị drop</li>
+        <li><span class="dot" style="background:#639922"></span>Network I/O (http, tcp) KHÔNG dùng thread pool — dùng OS async API</li>
+        <li><span class="dot" style="background:#639922"></span>Nhiều thread pool task song song → chúng chia sẻ các thread, không phải chạy đồng thời tất cả</li>
+      </ul>
+      <div class="code"><span class="cc"># Tăng thread pool size</span>
+UV_THREADPOOL_SIZE=<span class="cn">16</span> node app.js
+
+<span class="cc"># Hoặc trong code (phải set TRƯỚC khi dùng)</span>
+process.env.UV_THREADPOOL_SIZE = <span class="cs">'16'</span>;</div>
+    </div>
+  </div>
+
+  <!-- APIs using thread pool -->
+  <div class="card">
+    <div class="card-title">APIs sử dụng Thread Pool</div>
+    <div class="grid3">
+      <div>
+        <div class="section-label" style="color:#639922">File System (fs)</div>
+        <ul class="points">
+          <li><span class="dot" style="background:#639922"></span>fs.readFile / writeFile</li>
+          <li><span class="dot" style="background:#639922"></span>fs.stat / mkdir / readdir</li>
+          <li><span class="dot" style="background:#639922"></span>fs.open / close / read / write</li>
+          <li><span class="dot" style="background:#639922"></span>fs.rename / unlink / copyFile</li>
+        </ul>
+      </div>
+      <div>
+        <div class="section-label" style="color:#BA7517">Crypto</div>
+        <ul class="points">
+          <li><span class="dot" style="background:#BA7517"></span>crypto.pbkdf2</li>
+          <li><span class="dot" style="background:#BA7517"></span>crypto.scrypt</li>
+          <li><span class="dot" style="background:#BA7517"></span>crypto.randomBytes</li>
+          <li><span class="dot" style="background:#BA7517"></span>crypto.generateKeyPair</li>
+        </ul>
+      </div>
+      <div>
+        <div class="section-label" style="color:#7F77DD">Khác</div>
+        <ul class="points">
+          <li><span class="dot" style="background:#7F77DD"></span>zlib (gzip, deflate...)</li>
+          <li><span class="dot" style="background:#7F77DD"></span>dns.lookup (KHÔNG phải dns.resolve)</li>
+          <li><span class="dot" style="background:#7F77DD"></span>child_process.exec</li>
+          <li><span class="dot" style="background:#7F77DD"></span>Một số native addons</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottleneck demo -->
+  <div class="card">
+    <div class="card-title">⚠ Vấn đề bottleneck — 4 threads mặc định</div>
+    <div class="code"><span class="cc">// ❌ Vấn đề: 100 requests cùng gọi pbkdf2</span>
+<span class="cc">// Chỉ 4 threads → 96 requests phải ĐỢI trong queue</span>
+app.<span class="cf">post</span>(<span class="cs">'/login'</span>, <span class="ck">async</span> (req, res) => {
+  <span class="ck">const</span> hash = <span class="ck">await</span> <span class="cf">pbkdf2</span>(password, salt, <span class="cn">100000</span>, <span class="cn">64</span>, <span class="cs">'sha512'</span>);
+  <span class="cc">// pbkdf2 dùng thread pool → chỉ 4 thread chạy song song</span>
+  <span class="cc">// Request thứ 5 phải chờ thread rảnh!</span>
+});
+
+<span class="cc">// ✅ Giải pháp: tăng UV_THREADPOOL_SIZE</span>
+<span class="cc">// Hoặc dùng worker_threads để pool riêng</span>
+<span class="cc">// Hoặc dùng argon2/bcrypt có worker pool tích hợp</span></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     TAB 3: WORKER THREADS
+═══════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-worker">
+
+  <div class="callout" style="background:#FBEAF0;border-color:#D4537E;color:#72243E">
+    <strong>Worker Threads</strong> (module <code style="font-family:var(--mono)">worker_threads</code>) cho phép chạy JavaScript trong các thread riêng biệt. Mỗi worker có V8 instance và Event Loop riêng. Dùng cho CPU-intensive tasks mà thread pool không phù hợp.
+  </div>
+
+  <!-- Worker vs Thread Pool architecture -->
+  <div class="arch" style="margin-bottom:10px">
+    <div class="arch-label">Worker Thread — cấu trúc nội bộ</div>
+    <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center">
+      <div style="border:1px solid var(--border);border-radius:8px;padding:10px">
+        <div class="arch-label" style="color:#185FA5">Main Thread</div>
+        <div class="arch-box" style="background:#E6F1FB;color:#0C447C;border-color:#85B7EB;margin-bottom:6px">V8 + Event Loop</div>
+        <div class="arch-box sm" style="background:#E6F1FB;color:#0C447C;border-color:#85B7EB;margin-bottom:4px">workerData gửi đi</div>
+        <div class="arch-box sm" style="background:#E6F1FB;color:#0C447C;border-color:#85B7EB">on('message') nhận về</div>
+      </div>
+      <div style="text-align:center;color:var(--text3)">
+        <div style="font-size:18px">⇄</div>
+        <div style="font-size:10px;margin-top:4px">MessageChannel<br>postMessage<br>SharedArrayBuffer</div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:8px;padding:10px">
+        <div class="arch-label" style="color:#993556">Worker Thread</div>
+        <div class="arch-box" style="background:#FBEAF0;color:#72243E;border-color:#ED93B1;margin-bottom:6px">V8 riêng + Event Loop riêng</div>
+        <div class="arch-box sm" style="background:#FBEAF0;color:#72243E;border-color:#ED93B1;margin-bottom:4px">workerData nhận được</div>
+        <div class="arch-box sm" style="background:#FBEAF0;color:#72243E;border-color:#ED93B1">parentPort.postMessage gửi về</div>
+      </div>
+    </div>
+    <div style="margin-top:8px;font-size:11px;color:var(--text3)">
+      Mỗi Worker: thread riêng, bộ nhớ riêng (không share heap), JS context riêng. Giao tiếp qua message passing (structured clone) hoặc SharedArrayBuffer (share raw memory).
+    </div>
+  </div>
+
+  <!-- Code examples -->
+  <div class="grid2">
+    <div class="card">
+      <div class="card-title">main.js — Tạo và dùng Worker</div>
+      <div class="code"><span class="ck">const</span> { Worker, isMainThread,
+        workerData, parentPort }
+  = <span class="cf">require</span>(<span class="cs">'worker_threads'</span>);
+
+<span class="ck">if</span> (isMainThread) {
+  <span class="cc">// Chạy trên Main Thread</span>
+  <span class="ck">const</span> worker = <span class="ck">new</span> <span class="cf">Worker</span>(__filename, {
+    workerData: { numbers: [<span class="cn">1</span>,<span class="cn">2</span>,<span class="cn">3</span>,<span class="cn">4</span>,<span class="cn">5</span>] }
+  });
+
+  worker.<span class="cf">on</span>(<span class="cs">'message'</span>, (result) => {
+    console.<span class="cf">log</span>(<span class="cs">'Result:'</span>, result); <span class="cc">// 15</span>
+  });
+
+  worker.<span class="cf">on</span>(<span class="cs">'error'</span>, console.error);
+  worker.<span class="cf">on</span>(<span class="cs">'exit'</span>, (code) => {
+    console.<span class="cf">log</span>(<span class="cs">`Worker exited: \${code}\`</span>);
+  });
+
+  <span class="cc">// Main thread KHÔNG bị block!</span>
+  console.<span class="cf">log</span>(<span class="cs">'Main thread free to work'</span>);
+
+} <span class="ck">else</span> {
+  <span class="cc">// Chạy trên Worker Thread</span>
+  <span class="ck">const</span> { numbers } = workerData;
+  <span class="ck">const</span> sum = numbers.<span class="cf">reduce</span>((a, b) => a + b, <span class="cn">0</span>);
+  parentPort.<span class="cf">postMessage</span>(sum);
+}</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Worker Pool Pattern — tái sử dụng Worker</div>
+      <div class="code"><span class="cc">// worker-pool.js — Pool quản lý nhiều Worker</span>
+<span class="ck">class</span> WorkerPool {
+  <span class="cf">constructor</span>(workerFile, size = <span class="cn">4</span>) {
+    <span class="ck">this</span>.workers = [];
+    <span class="ck">this</span>.queue = [];
+    <span class="ck">for</span> (<span class="ck">let</span> i = <span class="cn">0</span>; i < size; i++) {
+      <span class="ck">this</span>.<span class="cf">_addWorker</span>(workerFile);
+    }
+  }
+
+  <span class="cf">_addWorker</span>(file) {
+    <span class="ck">const</span> w = <span class="ck">new</span> <span class="cf">Worker</span>(file);
+    w.busy = <span class="ck">false</span>;
+    w.<span class="cf">on</span>(<span class="cs">'message'</span>, (result) => {
+      w.busy = <span class="ck">false</span>;
+      w._resolve(result);
+      <span class="ck">if</span> (<span class="ck">this</span>.queue.length > <span class="cn">0</span>) {
+        <span class="ck">const</span> { data, resolve } = <span class="ck">this</span>.queue.<span class="cf">shift</span>();
+        <span class="ck">this</span>.<span class="cf">_run</span>(w, data, resolve);
+      }
+    });
+    <span class="ck">this</span>.workers.<span class="cf">push</span>(w);
+  }
+
+  <span class="cf">run</span>(data) {
+    <span class="ck">return new</span> Promise((resolve) => {
+      <span class="ck">const</span> free = <span class="ck">this</span>.workers.<span class="cf">find</span>(w => !w.busy);
+      <span class="ck">if</span> (free) <span class="ck">this</span>.<span class="cf">_run</span>(free, data, resolve);
+      <span class="ck">else this</span>.queue.<span class="cf">push</span>({ data, resolve });
+    });
+  }
+
+  <span class="cf">_run</span>(worker, data, resolve) {
+    worker.busy = <span class="ck">true</span>;
+    worker._resolve = resolve;
+    worker.<span class="cf">postMessage</span>(data);
+  }
+}</div>
+    </div>
+  </div>
+
+  <!-- SharedArrayBuffer -->
+  <div class="card">
+    <div class="card-title">SharedArrayBuffer — chia sẻ memory giữa threads</div>
+    <div class="code"><span class="cc">// Chia sẻ bộ nhớ thực sự (không cần serialize)</span>
+<span class="ck">const</span> sharedBuffer = <span class="ck">new</span> <span class="cf">SharedArrayBuffer</span>(<span class="cn">4</span>); <span class="cc">// 4 bytes</span>
+<span class="ck">const</span> sharedArray = <span class="ck">new</span> <span class="cf">Int32Array</span>(sharedBuffer);
+
+<span class="cc">// Main thread gửi buffer cho worker</span>
+<span class="ck">const</span> worker = <span class="ck">new</span> <span class="cf">Worker</span>(<span class="cs">'./worker.js'</span>, {
+  workerData: { sharedBuffer }
+});
+
+<span class="cc">// Đọc kết quả mà worker ghi vào (không cần postMessage)</span>
+<span class="cf">setTimeout</span>(() => {
+  console.<span class="cf">log</span>(sharedArray[<span class="cn">0</span>]); <span class="cc">// Giá trị worker đã ghi</span>
+}, <span class="cn">100</span>);
+
+<span class="cc">// Dùng Atomics để tránh race condition</span>
+Atomics.<span class="cf">store</span>(sharedArray, <span class="cn">0</span>, <span class="cn">42</span>);
+<span class="ck">const</span> val = Atomics.<span class="cf">load</span>(sharedArray, <span class="cn">0</span>);</div>
+    </div>
+
+  <!-- Key behaviors -->
+  <div class="card">
+    <div class="card-title">Đặc điểm quan trọng của Worker Threads</div>
+    <div class="grid2">
+      <ul class="points">
+        <li><span class="dot" style="background:#D4537E"></span><strong>V8 riêng:</strong> mỗi worker có heap riêng, GC riêng, không share JS objects</li>
+        <li><span class="dot" style="background:#D4537E"></span><strong>Event Loop riêng:</strong> worker có thể dùng setTimeout, Promise, fs... của riêng nó</li>
+        <li><span class="dot" style="background:#D4537E"></span><strong>Serialize khi gửi message:</strong> object được structured clone (deep copy) — overhead nếu data lớn</li>
+        <li><span class="dot" style="background:#D4537E"></span><strong>Transferable objects:</strong> ArrayBuffer có thể transfer (zero-copy) thay vì clone</li>
+      </ul>
+      <ul class="points">
+        <li><span class="dot" style="background:#D4537E"></span><strong>require/import:</strong> Worker có thể dùng module bình thường</li>
+        <li><span class="dot" style="background:#D4537E"></span><strong>Không share globals:</strong> global, process.env được copy, không share reference</li>
+        <li><span class="dot" style="background:#D4537E"></span><strong>Thread cost:</strong> tạo Worker tốn ~5-10ms và vài MB RAM — nên dùng pool</li>
+        <li><span class="dot" style="background:#D4537E"></span><strong>isMainThread:</strong> để viết file chạy được cả ở main và worker</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     TAB 4: COMPARE
+═══════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-compare">
+
+  <div class="card">
+    <div class="card-title">So sánh chi tiết</div>
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th>Tiêu chí</th>
+          <th>libuv Thread Pool</th>
+          <th>Worker Threads</th>
+          <th>OS Async I/O</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Ngôn ngữ</strong></td>
+          <td>C threads (libuv)</td>
+          <td>JavaScript threads</td>
+          <td>Kernel (epoll/kqueue)</td>
+        </tr>
+        <tr>
+          <td><strong>Số lượng</strong></td>
+          <td>Mặc định 4, max 1024</td>
+          <td>Tùy ý (do dev tạo)</td>
+          <td>Không giới hạn (kernel)</td>
+        </tr>
+        <tr>
+          <td><strong>Dùng cho</strong></td>
+          <td>I/O blocking (fs, crypto, dns)</td>
+          <td>CPU-intensive JS tasks</td>
+          <td>Network, pipes, sockets</td>
+        </tr>
+        <tr>
+          <td><strong>Cách dùng</strong></td>
+          <td>Tự động — gọi API bình thường</td>
+          <td>Thủ công — new Worker()</td>
+          <td>Tự động — http, net, tcp</td>
+        </tr>
+        <tr>
+          <td><strong>Chia sẻ memory</strong></td>
+          <td>Không (C level, JS không thấy)</td>
+          <td>SharedArrayBuffer + Atomics</td>
+          <td>Không áp dụng</td>
+        </tr>
+        <tr>
+          <td><strong>Giao tiếp</strong></td>
+          <td>Callback / Promise</td>
+          <td>postMessage / MessageChannel</td>
+          <td>Event (data, end, error)</td>
+        </tr>
+        <tr>
+          <td><strong>Overhead tạo</strong></td>
+          <td>Thấp (tạo 1 lần khi Node khởi động)</td>
+          <td>Cao (~5-10ms, vài MB/worker)</td>
+          <td>Rất thấp (kernel quản lý)</td>
+        </tr>
+        <tr>
+          <td><strong>Block Main Thread?</strong></td>
+          <td>Không</td>
+          <td>Không</td>
+          <td>Không</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Decision tree -->
+  <div class="card">
+    <div class="card-title">Khi nào dùng cái gì?</div>
+    <div class="code" style="font-family:var(--font);white-space:pre-wrap"><strong>Tác vụ của bạn là gì?</strong>
+
+├── Network request (HTTP, TCP, WebSocket)
+│   └── → Dùng bình thường (http, net...) — OS Async I/O tự xử lý
+
+├── Đọc/ghi file, nén file (zlib)
+│   └── → Dùng fs, zlib bình thường — Thread Pool tự xử lý
+
+├── Mã hóa mật khẩu (bcrypt, pbkdf2, scrypt)
+│   └── → Dùng crypto module — Thread Pool tự xử lý
+│       → Nếu cần nhiều concurrent: tăng UV_THREADPOOL_SIZE
+
+├── Tính toán nặng (sort 10M records, image processing, ML)
+│   └── → Dùng Worker Threads
+│       → Tạo Worker Pool để tái sử dụng
+
+└── Cần chạy nhiều JS song song (microservices trong 1 process)
+    └── → Worker Threads với MessageChannel</div>
+  </div>
+
+  <!-- Common mistakes -->
+  <div class="card">
+    <div class="card-title">Lỗi thường gặp</div>
+    <div class="code"><span class="cc">// ❌ Lỗi 1: Dùng Worker cho I/O thông thường (overkill)</span>
+<span class="ck">new</span> <span class="cf">Worker</span>(<span class="cs">'./read-file-worker.js'</span>); <span class="cc">// fs.readFile không cần Worker!</span>
+<span class="cc">// → Thread Pool xử lý tốt hơn, ít overhead hơn</span>
+
+<span class="cc">// ❌ Lỗi 2: Tạo Worker mới mỗi request</span>
+app.<span class="cf">get</span>(<span class="cs">'/compute'</span>, (req, res) => {
+  <span class="ck">const</span> w = <span class="ck">new</span> <span class="cf">Worker</span>(<span class="cs">'./heavy.js'</span>); <span class="cc">// Tốn 5-10ms mỗi request!</span>
+});
+<span class="cc">// → Dùng Worker Pool thay thế</span>
+
+<span class="cc">// ❌ Lỗi 3: Gửi data lớn qua postMessage (clone overhead)</span>
+worker.<span class="cf">postMessage</span>({ buffer: hugeBuffer }); <span class="cc">// Deep clone!</span>
+<span class="cc">// → Dùng transfer để zero-copy</span>
+worker.<span class="cf">postMessage</span>({ buffer: hugeBuffer }, [hugeBuffer.<span class="cf">buffer</span>]);
+
+<span class="cc">// ❌ Lỗi 4: Quên set UV_THREADPOOL_SIZE khi dùng nhiều crypto</span>
+<span class="cc">// 100 concurrent pbkdf2 với 4 threads → 96 requests xếp hàng chờ</span>
+<span class="cc">// → UV_THREADPOOL_SIZE=cpuCores * 2</span></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     TAB 5: V8 & CALL STACK
+═══════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-v8">
+
+  <div class="callout" style="background:#E6F1FB;border-color:#185FA5;color:#0C447C">
+    <strong>Tóm tắt xúc tích:</strong> V8 là engine C++ biên dịch và chạy JavaScript. Call Stack <strong>thuộc về V8</strong>, không phải libuv hay Node.js runtime. libuv điều phối <em>khi nào</em> chạy callback — V8 thực sự <em>chạy</em> nó trên Call Stack.
+  </div>
+
+  <!-- What V8 does -->
+  <div class="grid2">
+    <div class="card">
+      <div class="card-title" style="color:#185FA5">V8 Engine làm gì?</div>
+      <ul class="points">
+        <li><span class="dot" style="background:#185FA5"></span><strong>① Biên dịch JS → Machine Code</strong> — dùng JIT (Just-In-Time): lần đầu compile nhanh, code chạy nhiều lần (hot code) được tối ưu lại sâu hơn. Không interpret từng dòng như ngày xưa.</li>
+        <li><span class="dot" style="background:#185FA5"></span><strong>② Quản lý Heap (memory)</strong> — mọi object, array, closure bạn tạo đều nằm trong V8 Heap. V8 tự dọn rác qua Garbage Collector khi không còn reference nào trỏ tới.</li>
+        <li><span class="dot" style="background:#185FA5"></span><strong>③ Duy trì Call Stack</strong> — theo dõi function nào đang chạy, function nào gọi function nào. Đây là Call Stack mà bạn thấy trong stack trace khi có lỗi.</li>
+        <li><span class="dot" style="background:#185FA5"></span>V8 không biết gì về setTimeout, fs, http — đó là việc của libuv và Node.js bindings.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-title" style="color:#185FA5">Call Stack thuộc về ai?</div>
+      <p class="desc">Call Stack là <strong>của V8</strong> — không phải libuv, không phải Node.js runtime.</p>
+      <ul class="points">
+        <li><span class="dot" style="background:#185FA5"></span>Khi libuv muốn chạy một callback (từ timer, I/O, Poll phase...), nó giao callback đó cho V8</li>
+        <li><span class="dot" style="background:#185FA5"></span>V8 push callback lên Call Stack → thực thi → pop ra khi xong</li>
+        <li><span class="dot" style="background:#185FA5"></span>libuv quyết định <em>khi nào</em> — V8 thực sự <em>chạy</em></li>
+        <li><span class="dot" style="background:#185FA5"></span>Đây là lý do "JavaScript single-threaded" — V8 chỉ có 1 Call Stack, chỉ chạy 1 thứ tại 1 thời điểm</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Architecture breakdown -->
+  <div class="arch">
+    <div class="arch-label">Ai sở hữu cái gì trong Node.js?</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+      <!-- V8 -->
+      <div style="border:1px solid #85B7EB;border-radius:8px;padding:10px;background:#E6F1FB">
+        <div class="arch-label" style="color:#0C447C">V8 Engine (C++)</div>
+        <div class="arch-box sm" style="background:#fff;color:#0C447C;border-color:#85B7EB;margin-bottom:4px">Call Stack ✅</div>
+        <div class="arch-box sm" style="background:#fff;color:#0C447C;border-color:#85B7EB;margin-bottom:4px">Heap (objects, arrays) ✅</div>
+        <div class="arch-box sm" style="background:#fff;color:#0C447C;border-color:#85B7EB;margin-bottom:4px">JIT Compiler ✅</div>
+        <div class="arch-box sm" style="background:#fff;color:#0C447C;border-color:#85B7EB">Garbage Collector ✅</div>
+      </div>
+      <!-- libuv -->
+      <div style="border:1px solid #97C459;border-radius:8px;padding:10px;background:#EAF3DE">
+        <div class="arch-label" style="color:#27500A">libuv (C)</div>
+        <div class="arch-box sm" style="background:#fff;color:#27500A;border-color:#97C459;margin-bottom:4px">Event Loop ✅</div>
+        <div class="arch-box sm" style="background:#fff;color:#27500A;border-color:#97C459;margin-bottom:4px">Thread Pool ✅</div>
+        <div class="arch-box sm" style="background:#fff;color:#27500A;border-color:#97C459;margin-bottom:4px">OS async I/O ✅</div>
+        <div class="arch-box sm" style="background:#fff;color:#27500A;border-color:#97C459">Timers (nội bộ) ✅</div>
+      </div>
+      <!-- Node.js bindings -->
+      <div style="border:1px solid var(--border);border-radius:8px;padding:10px;background:var(--bg2)">
+        <div class="arch-label">Node.js Bindings</div>
+        <div class="arch-box sm" style="background:var(--bg);color:var(--text2);border-color:var(--border);margin-bottom:4px">setTimeout API → libuv</div>
+        <div class="arch-box sm" style="background:var(--bg);color:var(--text2);border-color:var(--border);margin-bottom:4px">fs module → libuv</div>
+        <div class="arch-box sm" style="background:var(--bg);color:var(--text2);border-color:var(--border);margin-bottom:4px">http module → libuv</div>
+        <div class="arch-box sm" style="background:var(--bg);color:var(--text2);border-color:var(--border)">Kết nối V8 ↔ libuv</div>
+      </div>
+    </div>
+    <div style="margin-top:10px;font-size:11px;color:var(--text3)">
+      Call Stack ❌ không thuộc libuv &nbsp;|&nbsp; Call Stack ❌ không thuộc Node.js runtime &nbsp;|&nbsp; Call Stack ✅ thuộc V8
+    </div>
+  </div>
+
+  <!-- Collaboration flow -->
+  <div class="card">
+    <div class="card-title">V8 và libuv hợp tác như thế nào?</div>
+    <div class="code"><span class="cc">// Ví dụ: fs.readFile — V8 và libuv phân công</span>
+
+fs.<span class="cf">readFile</span>(<span class="cs">'data.txt'</span>, (err, data) => {
+  console.<span class="cf">log</span>(data);
+});
+
+<span class="cc">/*
+BƯỚC 1 — V8 thực thi dòng fs.readFile():
+  • V8 chạy code JS này trên Call Stack
+  • Gặp fs.readFile → gọi Node.js binding
+
+BƯỚC 2 — Node.js binding chuyển sang libuv:
+  • Binding nhận callback, đăng ký với libuv
+  • libuv đẩy tác vụ vào Thread Pool
+  • V8 Call Stack tiếp tục, KHÔNG chờ
+
+BƯỚC 3 — libuv Thread Pool làm việc:
+  • Thread #1 đọc file (blocking C call)
+  • V8 hoàn toàn tự do, chạy code khác
+
+BƯỚC 4 — Thread Pool xong, libuv nhận kết quả:
+  • libuv đưa callback vào Poll Queue
+  • Event Loop (libuv) lấy callback ra
+
+BƯỚC 5 — libuv giao lại cho V8:
+  • libuv nói với V8: "chạy callback này đi"
+  • V8 push callback lên Call Stack → chạy
+  • console.log(data) thực thi trên V8 Call Stack
+*/</span></div>
+  </div>
+
+  <!-- Summary table -->
+  <div class="card">
+    <div class="card-title">Bảng tóm tắt — ai làm gì</div>
+    <table class="tbl">
+      <thead>
+        <tr><th>Thành phần</th><th>Thuộc về</th><th>Nhiệm vụ</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code style="font-family:var(--mono)">Call Stack</code></td><td><span class="tag" style="background:#E6F1FB;color:#0C447C">V8</span></td><td>Theo dõi function đang chạy, thứ tự gọi hàm</td></tr>
+        <tr><td><code style="font-family:var(--mono)">Heap</code></td><td><span class="tag" style="background:#E6F1FB;color:#0C447C">V8</span></td><td>Lưu trữ objects, arrays, closures</td></tr>
+        <tr><td><code style="font-family:var(--mono)">JIT Compiler</code></td><td><span class="tag" style="background:#E6F1FB;color:#0C447C">V8</span></td><td>Biên dịch JS → machine code tối ưu</td></tr>
+        <tr><td><code style="font-family:var(--mono)">Garbage Collector</code></td><td><span class="tag" style="background:#E6F1FB;color:#0C447C">V8</span></td><td>Dọn dẹp memory không còn dùng</td></tr>
+        <tr><td><code style="font-family:var(--mono)">Event Loop</code></td><td><span class="tag" style="background:#EAF3DE;color:#27500A">libuv</span></td><td>Điều phối khi nào chạy callback nào</td></tr>
+        <tr><td><code style="font-family:var(--mono)">Thread Pool</code></td><td><span class="tag" style="background:#EAF3DE;color:#27500A">libuv</span></td><td>Chạy I/O blocking (fs, crypto, zlib)</td></tr>
+        <tr><td><code style="font-family:var(--mono)">setTimeout / fs / http</code></td><td><span class="tag" style="background:var(--bg2);color:var(--text2)">Node.js binding</span></td><td>Cầu nối giữa JS API và libuv bên dưới</td></tr>
+        <tr><td><code style="font-family:var(--mono)">nextTick / Promise queues</code></td><td><span class="tag" style="background:var(--bg2);color:var(--text2)">Node.js runtime</span></td><td>Quản lý microtask, chạy giữa các Event Loop phase</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     TAB 6: DEMO
+═══════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-demo">
+  <div class="card">
+    <div class="card-title">Mô phỏng: Thread Pool vs Worker Thread vs Main Thread Block</div>
+
+    <div id="demo-desc" class="desc">Chọn một kịch bản để xem luồng xử lý:</div>
+
+    <div class="sim-controls">
+      <button class="btn primary" onclick="runDemo('threadpool')">Kịch bản 1: fs.readFile (Thread Pool)</button>
+      <button class="btn primary" onclick="runDemo('worker')" style="background:#D4537E;border-color:transparent">Kịch bản 2: CPU nặng (Worker Thread)</button>
+      <button class="btn primary" onclick="runDemo('block')" style="background:#E24B4A;border-color:transparent">Kịch bản 3: Block Main Thread ❌</button>
+      <button class="btn" onclick="resetDemo()">Reset</button>
+    </div>
+
+    <!-- Threads visual -->
+    <div id="demo-threads" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0"></div>
+
+    <!-- Timeline log -->
+    <div class="card-title" style="margin-top:8px">Timeline</div>
+    <div id="demo-log" style="font-family:var(--mono);font-size:11px;line-height:2;min-height:80px"></div>
+  </div>
+</div>
+
+<script>
+/* ── Tab switching ── */
+function switchTab(id) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('on'));
+  document.querySelectorAll('.tab').forEach(t => {
+    t.classList.remove('on');
+    t.style.background = '';
+    t.style.color = '';
+  });
+  document.getElementById('tab-' + id).classList.add('on');
+  const tabs = { overview:'#1D9E75', threadpool:'#639922', worker:'#D4537E', compare:'#185FA5', v8:'#378ADD', demo:'#BA7517' };
+  const idx = { overview:0, threadpool:1, worker:2, compare:3, v8:4, demo:5 };
+  const btn = document.querySelectorAll('.tab')[idx[id]];
+  btn.classList.add('on');
+  btn.style.background = tabs[id];
+  btn.style.color = '#fff';
+}
+
+/* ── Thread Pool simulation ── */
+const taskColors = {
+  fs:   { bg:'#EAF3DE', color:'#27500A', border:'#97C459' },
+  crypto:{ bg:'#FAEEDA', color:'#633806', border:'#FAC775' },
+  zlib:  { bg:'#EEEDFE', color:'#3C3489', border:'#AFA9EC' },
+  dns:   { bg:'#FBEAF0', color:'#72243E', border:'#ED93B1' },
+  idle:  { bg:'var(--bg2)', color:'var(--text3)', border:'var(--border)' },
+};
+
+let threads = [
+  { id:1, task:null, label:'idle' },
+  { id:2, task:null, label:'idle' },
+  { id:3, task:null, label:'idle' },
+  { id:4, task:null, label:'idle' },
+];
+let poolQueue = [];
+
+function renderPool() {
+  const grid = document.getElementById('pool-grid');
+  grid.innerHTML = threads.map(t => {
+    const c = t.task ? taskColors[t.task] : taskColors.idle;
+    return `<div class="thread-box" style="background:${c.bg};color:${c.color};border-color:${c.border}">
+      <div class="t-num">Thread #${t.id}</div>
+      <div class="t-task">${t.label}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('pool-queue-count').textContent = poolQueue.length;
+}
+
+function addTask(type, label) {
+  const freeThread = threads.find(t => !t.task);
+  if (freeThread) {
+    freeThread.task = type;
+    freeThread.label = label;
+    renderPool();
+    setTimeout(() => {
+      freeThread.task = null;
+      freeThread.label = 'idle';
+      if (poolQueue.length > 0) {
+        const next = poolQueue.shift();
+        freeThread.task = next.type;
+        freeThread.label = next.label;
+        renderPool();
+        setTimeout(() => {
+          freeThread.task = null;
+          freeThread.label = 'idle';
+          renderPool();
+        }, 1800);
+      } else {
+        renderPool();
+      }
+    }, 1800);
+  } else {
+    poolQueue.push({ type, label });
+    renderPool();
+  }
+}
+
+function resetPool() {
+  threads.forEach(t => { t.task = null; t.label = 'idle'; });
+  poolQueue = [];
+  renderPool();
+}
+
+renderPool();
+
+/* ── Demo simulation ── */
+let demoInterval = null;
+
+function resetDemo() {
+  clearInterval(demoInterval);
+  document.getElementById('demo-threads').innerHTML = '';
+  document.getElementById('demo-log').innerHTML = '';
+  document.getElementById('demo-desc').textContent = 'Chọn một kịch bản để xem luồng xử lý:';
+}
+
+function logLine(msg, color) {
+  const log = document.getElementById('demo-log');
+  const line = document.createElement('div');
+  line.style.color = color || 'var(--text2)';
+  line.textContent = msg;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+function setThreadState(id, state, task, bg, color) {
+  const el = document.getElementById('demo-t-' + id);
+  if (!el) return;
+  el.querySelector('.t-task').textContent = task;
+  el.style.background = bg;
+  el.style.color = color;
+}
+
+function buildThreads(config) {
+  const wrap = document.getElementById('demo-threads');
+  wrap.innerHTML = config.map(t =>
+    `<div class="thread-box" id="demo-t-${t.id}" style="background:var(--bg2);color:var(--text3);border-color:var(--border)">
+      <div class="t-num">${t.label}</div>
+      <div class="t-task">idle</div>
+    </div>`
+  ).join('');
+}
+
+function runDemo(scenario) {
+  resetDemo();
+  if (scenario === 'threadpool') {
+    document.getElementById('demo-desc').textContent = 'Kịch bản 1: fs.readFile() — Main Thread giao cho Thread Pool, không bị block';
+    buildThreads([
+      {id:'main', label:'Main Thread (Event Loop)'},
+      {id:'t1', label:'Pool Thread #1'},
+      {id:'t2', label:'Pool Thread #2'},
+      {id:'t3', label:'Pool Thread #3'},
+    ]);
+    const steps = [
+      [0,   () => { setThreadState('main','busy','fs.readFile() called','#E6F1FB','#0C447C'); logLine('t=0ms    Main Thread: gọi fs.readFile()','#185FA5'); }],
+      [200, () => { setThreadState('t1','busy','reading file...','#EAF3DE','#27500A'); logLine('t=5ms    Thread #1: nhận tác vụ, bắt đầu đọc file','#639922'); }],
+      [400, () => { setThreadState('main','free','handling requests...','#E6F1FB','#0C447C'); logLine('t=5ms    Main Thread: tự do, tiếp tục xử lý requests khác','#185FA5'); }],
+      [600, () => { logLine('t=10ms   Thread #1: đang đọc file... (blocking C call)','#639922'); }],
+      [1000,() => { setThreadState('t1','done','✓ file read done','#EAF3DE','#27500A'); logLine('t=50ms   Thread #1: đọc xong, báo libuv','#639922'); }],
+      [1200,() => { logLine('t=50ms   libuv: đưa callback vào Poll Queue','#888780'); }],
+      [1400,() => { setThreadState('t1','idle','idle','var(--bg2)','var(--text3)'); setThreadState('main','busy','running callback','#E1F5EE','#085041'); logLine('t=51ms   Event Loop (Poll phase): callback chạy trên Main Thread','#1D9E75'); }],
+      [1700,() => { setThreadState('main','free','handling requests...','#E6F1FB','#0C447C'); logLine('t=52ms   Xong! Main Thread không bị block trong suốt quá trình','#1D9E75'); }],
+    ];
+    steps.forEach(([delay, fn]) => setTimeout(fn, delay));
+
+  } else if (scenario === 'worker') {
+    document.getElementById('demo-desc').textContent = 'Kịch bản 2: CPU-intensive task → Worker Thread giải phóng Main Thread';
+    buildThreads([
+      {id:'main', label:'Main Thread'},
+      {id:'w1', label:'Worker Thread #1'},
+      {id:'w2', label:'Worker Thread #2'},
+    ]);
+    const steps = [
+      [0,   () => { setThreadState('main','busy','creating Workers...','#E6F1FB','#0C447C'); logLine('t=0ms    Main Thread: tạo Worker Threads','#185FA5'); }],
+      [300, () => { setThreadState('w1','busy','V8 init...','#FBEAF0','#72243E'); setThreadState('w2','busy','V8 init...','#FBEAF0','#72243E'); logLine('t=5ms    Worker #1 & #2: khởi tạo V8 + Event Loop riêng','#D4537E'); }],
+      [600, () => { setThreadState('main','free','serving requests...','#E6F1FB','#0C447C'); logLine('t=8ms    Main Thread: gửi data qua postMessage, tiếp tục serve','#185FA5'); }],
+      [800, () => { setThreadState('w1','busy','computing... 0%','#FBEAF0','#72243E'); setThreadState('w2','busy','computing... 0%','#FBEAF0','#72243E'); logLine('t=8ms    Worker #1: tính toán task A  |  Worker #2: tính toán task B','#D4537E'); }],
+      [1100,() => { setThreadState('w1','busy','computing... 50%','#FBEAF0','#72243E'); logLine('t=200ms  Workers đang chạy song song — Main Thread hoàn toàn tự do','#D4537E'); }],
+      [1400,() => { setThreadState('w1','done','✓ result ready','#FBEAF0','#72243E'); logLine('t=450ms  Worker #1: xong, postMessage kết quả về Main Thread','#D4537E'); }],
+      [1600,() => { setThreadState('w2','done','✓ result ready','#FBEAF0','#72243E'); logLine('t=480ms  Worker #2: xong, postMessage kết quả về Main Thread','#D4537E'); }],
+      [1800,() => { setThreadState('main','busy','on("message") cb','#E1F5EE','#085041'); logLine('t=481ms  Main Thread: nhận message, xử lý kết quả','#1D9E75'); }],
+      [2100,() => { setThreadState('main','free','serving requests...','#E6F1FB','#0C447C'); logLine('t=482ms  Hoàn tất — Main Thread không bị block trong suốt quá trình','#1D9E75'); }],
+    ];
+    steps.forEach(([delay, fn]) => setTimeout(fn, delay));
+
+  } else if (scenario === 'block') {
+    document.getElementById('demo-desc').textContent = 'Kịch bản 3 ❌: CPU nặng trên Main Thread — BLOCK toàn bộ server!';
+    buildThreads([
+      {id:'main', label:'Main Thread (BLOCKED)'},
+      {id:'req1', label:'Request #1 (chờ)'},
+      {id:'req2', label:'Request #2 (chờ)'},
+      {id:'req3', label:'Request #3 (chờ)'},
+    ]);
+    const steps = [
+      [0,   () => { setThreadState('main','busy','running sync loop...','#FCEBEB','#A32D2D'); logLine('t=0ms    Main Thread: bắt đầu tính toán nặng (while loop / sync CPU task)','#E24B4A'); }],
+      [200, () => { setThreadState('req1','wait','waiting...','#FAEEDA','#633806'); logLine('t=5ms    Request #1 đến — Event Loop không xử lý được vì Main Thread bận!','#E24B4A'); }],
+      [400, () => { setThreadState('req2','wait','waiting...','#FAEEDA','#633806'); logLine('t=10ms   Request #2 đến — tiếp tục xếp hàng...','#E24B4A'); }],
+      [600, () => { setThreadState('req3','wait','waiting...','#FAEEDA','#633806'); logLine('t=15ms   Request #3 đến — tất cả bị block!','#E24B4A'); }],
+      [900, () => { logLine('t=500ms  Main Thread vẫn đang tính toán... (500ms trôi qua)','#E24B4A'); }],
+      [1200,() => { setThreadState('main','done','✓ cpu task done','#FCEBEB','#A32D2D'); logLine('t=2000ms Main Thread xong — Event Loop mới chạy lại được','#E24B4A'); }],
+      [1400,() => { setThreadState('req1','done','handled (2s late)','#EAF3DE','#27500A'); setThreadState('req2','done','handled (2s late)','#EAF3DE','#27500A'); setThreadState('req3','done','handled (2s late)','#EAF3DE','#27500A'); logLine('t=2001ms Tất cả requests được xử lý — nhưng đã trễ 2 giây!','#E24B4A'); }],
+      [1700,() => { logLine('→ Giải pháp: dùng Worker Threads cho CPU-intensive tasks!','#1D9E75'); }],
+    ];
+    steps.forEach(([delay, fn]) => setTimeout(fn, delay));
+  }
+}
+</script>
+</body>
+</html>
